@@ -34,6 +34,7 @@ interface ReferatAnalysis {
     priority: "urgent" | "high" | "normal" | "low";
   }>;
   suggestedProjectCode: string | null;
+  _usage?: { input: number; output: number };
 }
 
 export interface ReferatResult {
