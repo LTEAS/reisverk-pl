@@ -710,7 +710,7 @@ async function acceptSuggestions(
     where: {
       status: "pending",
       ...(suggestionIds.length > 0 ? { id: { in: suggestionIds } } : {}),
-      suggestionType: { in: ["task", "follow_up", "deadline"] },
+      suggestionType: { in: ["new_task", "status_update", "close_task"] },
     },
     include: {
       project: { select: { name: true } },
