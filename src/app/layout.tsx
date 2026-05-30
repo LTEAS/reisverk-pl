@@ -44,3 +44,18 @@ export default function RootLayout({
             __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js')})}`,
           }}
         />
+        <Toaster
+          theme="dark"
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              background: '#1a1918',
+              border: '1px solid #2a2827',
+              color: '#fff',
+            },
+          }}
+        />
+      </body>
+    </html>
+  )
+}

@@ -77,4 +77,26 @@ export async function GET(request: NextRequest) {
       })
 
       // Auto-create trial subscription for new users (7 days)
-      const e
+      const existingSub = await prisma.subscription.findUnique({
+        where: { userId: data.user.id },
+      })
+      if (!existingSub) {
+        const trialEnd = new Date()
+        trialEnd.setDate(trialEnd.getDate() + 7)
+        await prisma.subscription.create({
+          data: {
+            userId: data.user.id,
+            status: 'trial',
+            trialEndsAt: trialEnd,
+            priceNok: 149,
+            monthlyCreditNok: 100,
+          },
+        })
+      }
+    } catch (e) {
+      console.error('Failed to upsert profile:', e)
+    }
+  }
+
+  return NextResponse.redirect(new URL('/', requestUrl.origin))
+}

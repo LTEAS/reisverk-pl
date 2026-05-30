@@ -39,4 +39,11 @@ export default async function AppLayout({
           <MobileNav user={userData} />
 
           {/* Page content */}
-          <main className="flex-
+          <main className="flex-1 overflow-y-auto">
+            {children}
+          </main>
+        </div>
+      </div>
+    </SyncProvider>
+  )
+}

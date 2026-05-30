@@ -174,4 +174,5 @@ export async function graphGetAll<T = any>(
     page++
   }
 
-  return { ite
+  return { items, deltaLink }
+}

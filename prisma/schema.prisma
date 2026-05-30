@@ -697,4 +697,8 @@ model Reminder {
   completedAt DateTime? @map("completed_at") @db.Timestamptz
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  user Profile @relation(fields: [userId], references: 
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, remindAt])
+  @@map("reminders")
+}

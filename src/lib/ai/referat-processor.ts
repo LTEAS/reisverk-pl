@@ -634,4 +634,30 @@ function buildSummary(analysis: ReferatAnalysis): string {
   const parts: string[] = [];
 
   if (analysis.meetingTitle) {
-    parts.push(`**${analysis.meetingTi
+    parts.push(`**${analysis.meetingTitle}**`);
+  }
+  if (analysis.meetingDate) {
+    parts.push(`Dato: ${analysis.meetingDate}`);
+  }
+  if (analysis.participants.length > 0) {
+    parts.push(`Deltakere: ${analysis.participants.join(", ")}`);
+  }
+
+  parts.push("");
+  parts.push(analysis.summary);
+
+  if (analysis.decisions.length > 0) {
+    parts.push("");
+    parts.push("Beslutninger:");
+    for (const d of analysis.decisions) {
+      parts.push(`- ${d}`);
+    }
+  }
+
+  if (analysis.actionItems.length > 0) {
+    parts.push("");
+    parts.push(`${analysis.actionItems.length} handlingspunkt(er) opprettet som forslag.`);
+  }
+
+  return parts.join("\n");
+}

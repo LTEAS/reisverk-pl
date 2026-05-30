@@ -939,4 +939,6 @@ async function completeReminder(
     return JSON.stringify({
       success: true,
       message: `Påminnelse "${reminder.title}" fullført`,
-    
+    });
+  }
+}

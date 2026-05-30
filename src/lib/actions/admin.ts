@@ -126,4 +126,18 @@ export async function addUserCredit(userId: string, creditNok: number) {
     },
   })
 
-  // Update mont
+  // Update monthly usage credit limit
+  await prisma.monthlyUsage.upsert({
+    where: { userId_periodMonth: { userId, periodMonth } },
+    create: {
+      userId,
+      periodMonth,
+      creditLimitNok: 100 + creditNok,
+      topUpCreditNok: creditNok,
+    },
+    update: {
+      creditLimitNok: { increment: creditNok },
+      topUpCreditNok: { increment: creditNok },
+    },
+  })
+}

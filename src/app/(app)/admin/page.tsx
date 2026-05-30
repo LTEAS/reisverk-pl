@@ -100,4 +100,7 @@ export default async function AdminPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <Ad
+      <AdminDashboard stats={stats} users={users} />
+    </div>
+  )
+}

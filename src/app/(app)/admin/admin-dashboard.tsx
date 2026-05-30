@@ -589,4 +589,37 @@ function BillingTab({ stats, users }: { stats: Stats; users: UserData[] }) {
                   </div>
                   <div className="flex items-center gap-4 text-[11px]">
                     <span className="text-stone-400">{u.callsThisMonth} kall</span>
-                    <span className="text-stone-400">{formatKr(u.costThisMont
+                    <span className="text-stone-400">{formatKr(u.costThisMonth)} brukt</span>
+                    <span className={remaining < 20 ? 'text-rose-400 font-medium' : 'text-stone-500'}>
+                      {formatKr(remaining)} gjenstår
+                    </span>
+                  </div>
+                </div>
+                <div className="h-2 rounded-full bg-[#2a2827] overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      pct >= 90 ? 'bg-rose-400' : pct >= 70 ? 'bg-amber-400' : 'bg-[#C07A4A]/60'
+                    }`}
+                    style={{ width: `${Math.max(pct, 1)}%` }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Vipps info */}
+      <div className="rounded-xl bg-[#1a1918] border border-[#2a2827] p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <CreditCard className="h-4 w-4 text-[#C07A4A]" />
+          <h3 className="text-sm font-semibold text-white">Vipps ePayment</h3>
+        </div>
+        <p className="text-xs text-stone-400">
+          Top-up-betalinger via Vipps er aktivert. Brukere kan kjøpe ekstra AI-kreditt (50, 100 eller 200 kr) fra innstillingssiden.
+          Abonnementsbetalinger (Vipps Recurring) kommer i neste fase.
+        </p>
+      </div>
+    </div>
+  )
+}
