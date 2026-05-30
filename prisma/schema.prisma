@@ -1,0 +1,704 @@
+// ============================================================================
+// Reisverk Prosjektoppfolging — Prisma Schema
+// Database: Supabase Postgres
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+enum AppRole {
+  admin
+  user
+
+  @@map("app_role")
+}
+
+enum ProjectRole {
+  owner
+  pl
+  member
+  observer
+
+  @@map("project_role")
+}
+
+enum TaskStatus {
+  apen
+  sendt
+  mottatt
+  signert
+  utfort
+  lukket
+
+  @@map("task_status")
+}
+
+enum PriorityLevel {
+  urgent
+  high
+  normal
+  low
+
+  @@map("priority_level")
+}
+
+enum TaskSource {
+  manual
+  ai_email
+  ai_attachment
+  meeting
+  briefing
+
+  @@map("task_source")
+}
+
+enum EmailDirection {
+  inbound
+  outbound
+
+  @@map("email_direction")
+}
+
+enum ReplyStatus {
+  awaiting_reply
+  needs_reply
+  replied
+  no_reply_needed
+  ignored
+
+  @@map("reply_status")
+}
+
+enum SuggestionStatus {
+  pending
+  accepted
+  rejected
+
+  @@map("suggestion_status")
+}
+
+enum SuggestionType {
+  new_task
+  new_project
+  status_update
+  close_task
+
+  @@map("suggestion_type")
+}
+
+enum SubscriptionStatus {
+  active
+  paused
+  cancelled
+  trial
+
+  @@map("subscription_status")
+}
+
+enum TopUpStatus {
+  pending
+  completed
+  failed
+  refunded
+
+  @@map("top_up_status")
+}
+
+enum MeetingStatus {
+  upcoming
+  prep_ready
+  completed
+  cancelled
+
+  @@map("meeting_status")
+}
+
+enum BriefingItemKind {
+  email
+  meeting
+  task
+
+  @@map("briefing_item_kind")
+}
+
+enum ReplySuggestionStatus {
+  suggested
+  drafted
+  dismissed
+
+  @@map("reply_suggestion_status")
+}
+
+// ============================================================================
+// Models
+// ============================================================================
+
+/// User profile — id matches Supabase auth.users.id (no FK enforced by Prisma)
+model Profile {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  displayName String?  @map("display_name")
+  email       String?
+  entraOid    String?  @map("entra_oid")
+  onboardingCompleted Boolean @default(false) @map("onboarding_completed")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  userRoles         UserRole[]
+  userSettings      UserSettings?
+  microsoftAccount  MicrosoftAccount?
+  createdProjects   Project[]          @relation("ProjectCreator")
+  projectMembers    ProjectMember[]
+  emails            Email[]
+  tasks             Task[]             @relation("TaskCreator")
+  assignedTasks     Task[]             @relation("TaskAssignee")
+  reviewedSuggestions AiSuggestion[]   @relation("SuggestionReviewer")
+  meetings          Meeting[]
+  meetingPreps      MeetingPrep[]
+  dailyBriefings    DailyBriefing[]
+  briefingItems     BriefingItem[]
+  briefingPriorities BriefingPriority[]
+  chatThreads       ChatThread[]
+  chatMessages      ChatMessage[]
+  replySuggestions  ReplySuggestion[]
+  aiCallLogs        AiCallLog[]
+  refreshQuotas     RefreshQuota[]
+  syncLogs          SyncLog[]
+  memories          Memory[]
+  subscription      Subscription?
+  topUps            TopUp[]
+  monthlyUsage      MonthlyUsage[]
+  reminders         Reminder[]
+
+  @@map("profiles")
+}
+
+model UserRole {
+  id     String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String  @map("user_id") @db.Uuid
+  role   AppRole
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@map("user_roles")
+}
+
+model UserSettings {
+  userId                   String   @id @map("user_id") @db.Uuid
+  briefingTime             String   @default("06:00") @map("briefing_time")
+  aiLanguage               String   @default("nb") @map("ai_language")
+  autoCreateTasks          Boolean  @default(false) @map("auto_create_tasks")
+  requireTaskConfirmation  Boolean  @default(true) @map("require_task_confirmation")
+  syncEnabled              Boolean  @default(true) @map("sync_enabled")
+  syncIntervalMin          Int      @default(30) @map("sync_interval_min")
+  prepHoursBefore          Int      @default(2) @map("prep_hours_before")
+  userRole                 AppRole  @default(user) @map("user_role")
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model Project {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String
+  shortCode    String?  @map("short_code")
+  description  String?
+  byggherre    String?
+  searchTerms  String[] @map("search_terms")
+  excludeTerms String[] @map("exclude_terms")
+  createdBy    String   @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  creator        Profile         @relation("ProjectCreator", fields: [createdBy], references: [id])
+  members        ProjectMember[]
+  contacts       Contact[]
+  emailMonitors  EmailMonitor[]
+  emails         Email[]
+  tasks          Task[]
+  aiSuggestions  AiSuggestion[]
+  meetings       Meeting[]
+  briefingItems  BriefingItem[]
+  replySuggestions ReplySuggestion[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String      @map("project_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  role      ProjectRole @default(member)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model Contact {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  name            String
+  email           String?
+  phone           String?
+  company         String?
+  roleDescription String?  @map("role_description")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("contacts")
+}
+
+model EmailMonitor {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId    String   @map("project_id") @db.Uuid
+  emailAddress String   @map("email_address")
+  displayName  String?  @map("display_name")
+  description  String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, emailAddress])
+  @@map("email_monitors")
+}
+
+model MicrosoftAccount {
+  userId       String   @id @map("user_id") @db.Uuid
+  accountEmail String?  @map("account_email")
+  accountName  String?  @map("account_name")
+  accessToken  String?  @map("access_token")
+  refreshToken String?  @map("refresh_token")
+  expiresAt    DateTime? @map("expires_at") @db.Timestamptz
+  scope        String?
+  connectedAt  DateTime? @map("connected_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("microsoft_accounts")
+}
+
+model Email {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String          @map("user_id") @db.Uuid
+  projectId        String?         @map("project_id") @db.Uuid
+  graphMessageId   String?         @map("graph_message_id")
+  conversationId   String?         @map("conversation_id")
+  internetMsgId    String?         @map("internet_msg_id")
+  subject          String?
+  bodyPreview      String?         @map("body_preview")
+  bodyText         String?         @map("body_text")
+  senderEmail      String?         @map("sender_email")
+  senderName       String?         @map("sender_name")
+  recipients       Json?
+  direction        EmailDirection?
+  receivedAt       DateTime?       @map("received_at") @db.Timestamptz
+  sentAt           DateTime?       @map("sent_at") @db.Timestamptz
+  hasAttachments   Boolean         @default(false) @map("has_attachments")
+  attachmentNames  String[]        @map("attachment_names")
+  importance       String?
+  isRead           Boolean         @default(false) @map("is_read")
+  noiseScore       Int             @default(0) @map("noise_score")
+  aiSummary        String?         @map("ai_summary")
+  aiActionNeeded   Boolean         @default(false) @map("ai_action_needed")
+  aiActionDesc     String?         @map("ai_action_desc")
+  aiProcessedAt    DateTime?       @map("ai_processed_at") @db.Timestamptz
+  replyStatus      ReplyStatus?    @map("reply_status")
+  repliedAt        DateTime?       @map("replied_at") @db.Timestamptz
+  projectMatchScore Float?         @map("project_match_score")
+  referatProcessed Boolean         @default(false) @map("referat_processed")
+  referatSummary   String?         @map("referat_summary")
+  syncedAt         DateTime?       @map("synced_at") @db.Timestamptz
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  user             Profile          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project          Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  tasks            Task[]           @relation("TaskSourceEmail")
+  replySuggestions ReplySuggestion[]
+
+  @@unique([userId, graphMessageId])
+  @@index([userId])
+  @@index([projectId])
+  @@index([conversationId])
+  @@index([receivedAt])
+  @@map("emails")
+}
+
+model Task {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId       String        @map("project_id") @db.Uuid
+  title           String
+  description     String?
+  note            String?
+  status          TaskStatus    @default(apen)
+  priority        PriorityLevel @default(normal)
+  assignee        String?
+  assigneeUserId  String?       @map("assignee_user_id") @db.Uuid
+  waitingFor      String?       @map("waiting_for")
+  dueDate         DateTime?     @map("due_date") @db.Timestamptz
+  snoozeUntil     DateTime?     @map("snooze_until") @db.Timestamptz
+  completedAt     DateTime?     @map("completed_at") @db.Timestamptz
+  source          TaskSource    @default(manual)
+  sourceEmailId   String?       @map("source_email_id") @db.Uuid
+  sourceReference String?       @map("source_reference")
+  meetingId       String?       @map("meeting_id") @db.Uuid
+  aiGenerated     Boolean       @default(false) @map("ai_generated")
+  aiConfidence    Float?        @map("ai_confidence")
+  taskNumber      Int           @map("task_number")
+  sortOrder       Int           @default(0) @map("sort_order")
+  createdBy       String        @map("created_by") @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  project           Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assigneeUser      Profile?           @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  sourceEmail       Email?             @relation("TaskSourceEmail", fields: [sourceEmailId], references: [id], onDelete: SetNull)
+  meeting           Meeting?           @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  creator           Profile            @relation("TaskCreator", fields: [createdBy], references: [id])
+  briefingPriorities BriefingPriority[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+model AiSuggestion {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId          String           @map("project_id") @db.Uuid
+  suggestionType     SuggestionType   @map("suggestion_type")
+  title              String
+  details            Json             @default("{}")
+  sourceEmailId      String?          @map("source_email_id")
+  sourceEmailSubject String?          @map("source_email_subject")
+  status             SuggestionStatus @default(pending)
+  reviewedAt         DateTime?        @map("reviewed_at") @db.Timestamptz
+  reviewedBy         String?          @map("reviewed_by") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  reviewer Profile? @relation("SuggestionReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([status])
+  @@map("ai_suggestions")
+}
+
+model Meeting {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  projectId      String?       @map("project_id") @db.Uuid
+  graphEventId   String?       @map("graph_event_id")
+  graphIcalUid   String?       @map("graph_ical_uid")
+  subject        String?
+  startsAt       DateTime      @map("starts_at") @db.Timestamptz
+  endsAt         DateTime      @map("ends_at") @db.Timestamptz
+  isAllDay       Boolean       @default(false) @map("is_all_day")
+  location       String?
+  isOnline       Boolean       @default(false) @map("is_online")
+  onlineUrl      String?       @map("online_url")
+  organizerName  String?       @map("organizer_name")
+  organizerEmail String?       @map("organizer_email")
+  attendees      Json?
+  status         MeetingStatus @default(upcoming)
+  syncedAt       DateTime?     @map("synced_at") @db.Timestamptz
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  user         Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  meetingPreps MeetingPrep[]
+  tasks        Task[]
+
+  @@unique([userId, graphEventId])
+  @@index([userId])
+  @@index([startsAt])
+  @@map("meetings")
+}
+
+model MeetingPrep {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  meetingId        String   @map("meeting_id") @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  agendaSummary    String?  @map("agenda_summary")
+  emailSummary     String?  @map("email_summary")
+  keyTopics        Json?    @map("key_topics")
+  openQuestions    Json?    @map("open_questions")
+  relatedEmailIds  String[] @map("related_email_ids")
+  relatedTaskIds   String[] @map("related_task_ids")
+  reviewedByUser   Boolean  @default(false) @map("reviewed_by_user")
+  generatedAt      DateTime? @map("generated_at") @db.Timestamptz
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user    Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("meeting_prep")
+}
+
+model DailyBriefing {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  briefingDate     DateTime  @map("briefing_date") @db.Date
+  meetingsToday    Int       @default(0) @map("meetings_today")
+  meetingsList     Json?     @map("meetings_list")
+  overdueTasks     Int       @default(0) @map("overdue_tasks")
+  overdueList      Json?     @map("overdue_list")
+  unansweredEmails Int       @default(0) @map("unanswered_emails")
+  unansweredList   Json?     @map("unanswered_list")
+  emailsReceived24h Int      @default(0) @map("emails_received_24h")
+  emailsSent24h    Int       @default(0) @map("emails_sent_24h")
+  summary          String?
+  summaryJson      Json?     @map("summary_json")
+  readAt           DateTime? @map("read_at") @db.Timestamptz
+  generatedAt      DateTime? @map("generated_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, briefingDate])
+  @@map("daily_briefings")
+}
+
+model BriefingItem {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String           @map("user_id") @db.Uuid
+  kind        BriefingItemKind
+  refId       String           @map("ref_id")
+  projectId   String?          @map("project_id") @db.Uuid
+  snapshot    Json?
+  firstSeenAt DateTime         @map("first_seen_at") @db.Timestamptz
+  lastSeenAt  DateTime         @map("last_seen_at") @db.Timestamptz
+  dismissedAt DateTime?        @map("dismissed_at") @db.Timestamptz
+  resolvedAt  DateTime?        @map("resolved_at") @db.Timestamptz
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  user    Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@map("briefing_items")
+}
+
+model BriefingPriority {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  briefingDate DateTime  @map("briefing_date") @db.Date
+  itemKey      String    @map("item_key")
+  itemText     String    @map("item_text")
+  status       String    @default("open")
+  snoozeUntil  DateTime? @map("snooze_until") @db.Timestamptz
+  taskId       String?   @map("task_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@map("briefing_priorities")
+}
+
+model ChatThread {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@map("chat_threads")
+}
+
+model ChatMessage {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  threadId  String   @map("thread_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  role      String   // user, assistant, system
+  parts     Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   Profile    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_messages")
+}
+
+model ReplySuggestion {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  emailId         String                @map("email_id") @db.Uuid
+  userId          String                @map("user_id") @db.Uuid
+  projectId       String?               @map("project_id") @db.Uuid
+  draftSubject    String?               @map("draft_subject")
+  draftBody       String?               @map("draft_body")
+  tone            String?
+  confidence      Float?
+  outlookDraftId  String?               @map("outlook_draft_id")
+  outlookWebLink  String?               @map("outlook_web_link")
+  status          ReplySuggestionStatus @default(suggested)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  email   Email    @relation(fields: [emailId], references: [id], onDelete: Cascade)
+  user    Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@map("reply_suggestions")
+}
+
+model AiCallLog {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  purpose          String?
+  model            String?
+  promptTokens     Int      @map("prompt_tokens")
+  completionTokens Int      @map("completion_tokens")
+  totalTokens      Int      @map("total_tokens")
+  durationMs       Int      @map("duration_ms")
+  estimatedCostNok Float?   @map("estimated_cost_nok")
+  status           String?
+  errorMessage     String?  @map("error_message")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ai_call_log")
+}
+
+model RefreshQuota {
+  userId      String   @map("user_id") @db.Uuid
+  periodMonth String   @map("period_month")
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, periodMonth])
+  @@map("refresh_quota")
+}
+
+model SyncLog {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  syncType     String?   @map("sync_type")
+  status       String?
+  startedAt    DateTime? @map("started_at") @db.Timestamptz
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz
+  itemsSynced  Int       @default(0) @map("items_synced")
+  itemsCreated Int       @default(0) @map("items_created")
+  itemsUpdated Int       @default(0) @map("items_updated")
+  deltaLink    String?   @map("delta_link")
+  lastSyncAt   DateTime? @map("last_sync_at") @db.Timestamptz
+  errorMessage String?   @map("error_message")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sync_log")
+}
+
+// ============================================================================
+// Billing & Quotas
+// ============================================================================
+
+model Subscription {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String             @unique @map("user_id") @db.Uuid
+  status            SubscriptionStatus @default(trial)
+  planName          String             @default("standard") @map("plan_name")
+  priceNok          Int                @default(149) @map("price_nok")
+  monthlyCreditNok  Int                @default(100) @map("monthly_credit_nok") // AI-bruk inkludert i kr
+  isFreeAccount     Boolean            @default(false) @map("is_free_account")
+  vippsAgreementId  String?            @map("vipps_agreement_id")
+  currentPeriodStart DateTime?         @map("current_period_start") @db.Timestamptz
+  currentPeriodEnd   DateTime?         @map("current_period_end") @db.Timestamptz
+  trialEndsAt       DateTime?          @map("trial_ends_at") @db.Timestamptz
+  cancelledAt       DateTime?          @map("cancelled_at") @db.Timestamptz
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model TopUp {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  amountNok       Int         @map("amount_nok") // f.eks. 49, 99, 199
+  creditNok       Int         @map("credit_nok") // AI-kreditt gitt
+  status          TopUpStatus @default(pending)
+  vippsOrderId    String?     @map("vipps_order_id")
+  periodMonth     String      @map("period_month") // "2026-05"
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("top_ups")
+}
+
+model MonthlyUsage {
+  userId          String   @map("user_id") @db.Uuid
+  periodMonth     String   @map("period_month") // "2026-05"
+  totalCostNok    Float    @default(0) @map("total_cost_nok")
+  totalCalls      Int      @default(0) @map("total_calls")
+  totalTokens     Int      @default(0) @map("total_tokens")
+  creditLimitNok  Float    @default(100) @map("credit_limit_nok") // inkl top-ups
+  topUpCreditNok  Float    @default(0) @map("top_up_credit_nok")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, periodMonth])
+  @@map("monthly_usage")
+}
+
+model Memory {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  type        String
+  name        String
+  description String?
+  content     String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@map("memories")
+}
+
+model Reminder {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  title       String
+  description String?
+  remindAt    DateTime  @map("remind_at") @db.Timestamptz
+  recurring   String?   // "daily", "weekly", "monthly", or null for one-time
+  completed   Boolean   @default(false)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, remindAt])
+  @@map("reminders")
+}
