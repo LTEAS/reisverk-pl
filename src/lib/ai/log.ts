@@ -105,22 +105,4 @@ export async function logAiCall(params: {
       await prisma.monthlyUsage.upsert({
         where: { userId_periodMonth: { userId: params.userId, periodMonth } },
         create: {
-          userId: params.userId,
-          periodMonth,
-          totalCostNok: costNok,
-          totalCalls: 1,
-          totalTokens: params.totalTokens,
-          creditLimitNok: 100,
-        },
-        update: {
-          totalCostNok: { increment: costNok },
-          totalCalls: { increment: 1 },
-          totalTokens: { increment: params.totalTokens },
-        },
-      });
-    }
-  } catch {
-    // Best-effort — never throw from logging
-    console.error("[logAiCall] Failed to log AI call:", params.purpose);
-  }
-}
+       

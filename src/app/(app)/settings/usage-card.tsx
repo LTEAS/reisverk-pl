@@ -174,48 +174,4 @@ export function UsageCard({ subscription, usage, topUps }: UsageCardProps) {
                     <Loader2 className="h-4 w-4 animate-spin text-[#C07A4A]" />
                     <span className="text-sm text-stone-400">Åpner Vipps...</span>
                   </div>
-                ) : (
-                  <>
-                    <p className="text-sm font-medium text-white group-hover:text-[#C07A4A] transition-colors">
-                      +{opt.creditNok} kr kreditt
-                    </p>
-                    <p className="text-xs text-stone-500 mt-0.5">{opt.amountNok} kr</p>
-                  </>
-                )}
-              </button>
-            ))}
-          </div>
-          {error && (
-            <p className="text-[11px] text-rose-400 mt-2">{error}</p>
-          )}
-          <p className="text-[10px] text-stone-600 mt-2">
-            Betaling via Vipps. Kreditten gjelder inneværende måned.
-          </p>
-        </div>
-
-        {/* Recent top-ups */}
-        {topUps.length > 0 && (
-          <div className="border-t border-[#2a2827] pt-4">
-            <h4 className="text-xs font-medium text-stone-400 mb-2">Tidligere kjøp</h4>
-            <div className="space-y-1.5">
-              {topUps.map((t) => (
-                <div key={t.id} className="flex items-center justify-between text-[11px]">
-                  <span className="text-stone-400">
-                    +{t.creditNok} kr kreditt
-                  </span>
-                  <span className="text-stone-500">
-                    {t.amountNok > 0 ? `${t.amountNok} kr` : 'Gratis'} &middot;{' '}
-                    {new Date(t.createdAt).toLocaleDateString('nb-NO', {
-                      day: 'numeric',
-                      month: 'short',
-                    })}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
+      
