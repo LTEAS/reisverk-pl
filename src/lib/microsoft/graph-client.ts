@@ -167,7 +167,7 @@ export async function graphGetAll<T = any>(
   let page = 0
 
   while (nextLink && page < maxPages) {
-    const data = await graphGet<GraphResponse<T>>(userId, nextLink)
+    const data: GraphResponse<T> = await graphGet<GraphResponse<T>>(userId, nextLink)
     items.push(...(data.value || []))
     nextLink = data['@odata.nextLink']
     deltaLink = data['@odata.deltaLink']
