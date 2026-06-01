@@ -500,7 +500,7 @@ Vær konsis. Bare inkluder oppdateringsseksjonen i summary hvis det faktisk har 
 // Main export
 // ---------------------------------------------------------------------------
 
-const BRIEFING_MODEL = 'claude-opus-4-6'
+const BRIEFING_MODEL = 'claude-sonnet-4-6'
 const BRIEFING_MONTHLY_LIMIT = 30
 
 export async function generateBriefing(userId: string): Promise<BriefingResult> {
