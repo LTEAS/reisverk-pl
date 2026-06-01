@@ -111,9 +111,7 @@ export async function acceptSuggestion(suggestionId: string, overrideProjectId?:
     },
   })
 
-  revalidatePath('/')
   revalidatePath('/tasks')
-  revalidatePath('/projects')
   revalidatePath(`/projects/${suggestion.projectId}`)
 }
 
@@ -133,5 +131,5 @@ export async function rejectSuggestion(suggestionId: string) {
     },
   })
 
-  revalidatePath('/')
+  revalidatePath('/tasks')
 }

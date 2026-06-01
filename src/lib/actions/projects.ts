@@ -60,7 +60,6 @@ export async function createProject(formData: FormData) {
   })
 
   revalidatePath('/projects')
-  revalidatePath('/')
 
   return project.id
 }
@@ -114,7 +113,6 @@ export async function deleteProject(projectId: string) {
   })
 
   revalidatePath('/projects')
-  revalidatePath('/')
 }
 
 // ---------------------------------------------------------------------------

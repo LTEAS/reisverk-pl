@@ -67,7 +67,6 @@ export async function createTask(formData: FormData) {
 
   revalidatePath('/tasks')
   revalidatePath(`/projects/${projectId}`)
-  revalidatePath('/')
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +99,6 @@ export async function updateTaskStatus(taskId: string, newStatus: TaskStatus) {
 
   revalidatePath('/tasks')
   revalidatePath(`/projects/${task.projectId}`)
-  revalidatePath('/')
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +146,6 @@ export async function snoozeTask(
 
   revalidatePath('/tasks')
   revalidatePath(`/projects/${task.projectId}`)
-  revalidatePath('/')
 }
 
 // ---------------------------------------------------------------------------
@@ -174,5 +171,4 @@ export async function deleteTask(taskId: string) {
 
   revalidatePath('/tasks')
   revalidatePath(`/projects/${task.projectId}`)
-  revalidatePath('/')
 }
