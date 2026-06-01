@@ -646,16 +646,35 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
   }[] = []
 
   try {
-    // Strip markdown code fences if present
-    const jsonStr = rawText.replace(/^```json?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim()
+    // Strip markdown code fences — handle various formats
+    let jsonStr = rawText.trim()
+    // Remove leading ```json or ``` and trailing ```
+    jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```\s*$/i, '').trim()
+    // If still wrapped in code fences (double-wrapped), strip again
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```\s*$/i, '').trim()
+    }
     const parsed = JSON.parse(jsonStr)
     summary = parsed.summary || summary
     actionItems = Array.isArray(parsed.actionItems) ? parsed.actionItems : []
     taskSuggestions = Array.isArray(parsed.taskSuggestions) ? parsed.taskSuggestions : []
-  } catch {
-    // If JSON parsing fails, use raw text as summary
-    summary = rawText
-    console.warn('Briefing AI response was not valid JSON, using raw text')
+  } catch (parseErr) {
+    // Try to extract JSON from the response if it's embedded in other text
+    const jsonMatch = rawText.match(/\{[\s\S]*"summary"[\s\S]*\}/)
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0])
+        summary = parsed.summary || summary
+        actionItems = Array.isArray(parsed.actionItems) ? parsed.actionItems : []
+        taskSuggestions = Array.isArray(parsed.taskSuggestions) ? parsed.taskSuggestions : []
+      } catch {
+        summary = rawText
+        console.warn('Briefing: could not parse JSON even with fallback extraction')
+      }
+    } else {
+      summary = rawText
+      console.warn('Briefing: no JSON found in response')
+    }
   }
 
   // Sync action items to briefing_priorities table
