@@ -184,7 +184,7 @@ export async function classifyEmails(userId: string): Promise<{
     }
 
     // AI-klassifisering
-    const classification = await classifySingleEmail(anthropic, email, projectContext)
+    const classification = await classifySingleEmail(email, projectContext)
     if (classification._usage) {
       totalInputTokens += classification._usage.input
       totalOutputTokens += classification._usage.output
@@ -294,7 +294,6 @@ export async function classifyEmails(userId: string): Promise<{
 // ---------------------------------------------------------------------------
 
 async function classifySingleEmail(
-  anthropic: any,
   email: {
     subject: string | null
     bodyPreview: string | null
