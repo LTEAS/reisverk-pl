@@ -150,8 +150,9 @@ model Profile {
   displayName String?  @map("display_name")
   email       String?
   entraOid    String?  @map("entra_oid")
-  onboardingCompleted Boolean @default(false) @map("onboarding_completed")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  onboardingCompleted Boolean   @default(false) @map("onboarding_completed")
+  termsAcceptedAt     DateTime? @map("terms_accepted_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
   userRoles         UserRole[]

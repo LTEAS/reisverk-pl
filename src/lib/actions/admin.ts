@@ -92,6 +92,15 @@ export async function dismissOnboarding() {
   revalidatePath('/')
 }
 
+export async function acceptTerms() {
+  const user = await requireUser()
+  await prisma.profile.update({
+    where: { id: user.id },
+    data: { termsAcceptedAt: new Date() },
+  })
+  revalidatePath('/')
+}
+
 export async function toggleFreeAccount(userId: string, isFree: boolean) {
   await requireAdmin()
 

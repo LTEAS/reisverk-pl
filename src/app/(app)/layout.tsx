@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import { requireUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { AppSidebar } from '@/components/app-sidebar'
@@ -10,6 +11,15 @@ export default async function AppLayout({
   children: React.ReactNode
 }) {
   const user = await requireUser()
+
+  // Check if terms are accepted
+  const profile = await prisma.profile.findUnique({
+    where: { id: user.id },
+    select: { termsAcceptedAt: true },
+  })
+  if (!profile?.termsAcceptedAt) {
+    redirect('/godkjenn-vilkar')
+  }
 
   // Check admin role from DB
   const userRoles = await prisma.userRole.findMany({
