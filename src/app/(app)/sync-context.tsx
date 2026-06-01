@@ -71,16 +71,31 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       console.log('Refresh response:', JSON.stringify(data, null, 2))
 
+      // Build status from pipeline results (works for both ok and partial success)
+      const parts: string[] = []
+      if (data.sync?.synced) parts.push(`${data.sync.synced} e-poster`)
+      if (data.calendar?.synced) parts.push(`${data.calendar.synced} kalenderhendelser`)
+      if (data.classification?.processed) parts.push(`${data.classification.processed} klassifisert`)
+      if (data.classification?.suggestionsCreated) parts.push(`${data.classification.suggestionsCreated} forslag`)
+      if (data.autoClose?.tasksUpdated) parts.push(`${data.autoClose.tasksUpdated} auto-oppdatert`)
+
+      // Collect step-level errors
+      const errors: string[] = []
+      if (data.sync?.error) errors.push(`e-post: ${data.sync.error}`)
+      if (data.calendar?.error) errors.push(`kalender: ${data.calendar.error}`)
+      if (data.classification?.error) errors.push(`klassifisering: ${data.classification.error}`)
+      if (data.autoClose?.error) errors.push(`auto-lukking: ${data.autoClose.error}`)
+      if (data.meetingPrep?.error) errors.push(`møteforberedelse: ${data.meetingPrep.error}`)
+      if (data.briefing?.error) errors.push(`briefing: ${data.briefing.error}`)
+
       if (data.ok) {
-        const parts: string[] = []
-        if (data.sync?.synced) parts.push(`${data.sync.synced} e-poster`)
-        if (data.classification?.processed) parts.push(`${data.classification.processed} klassifisert`)
-        if (data.classification?.suggestionsCreated) parts.push(`${data.classification.suggestionsCreated} forslag`)
-        if (data.autoClose?.tasksUpdated) parts.push(`${data.autoClose.tasksUpdated} auto-oppdatert`)
-        if (data.classification?.error) parts.push(`FEIL: ${data.classification.error}`)
-        if (data.sync?.error) parts.push(`Synk-feil: ${data.sync.error}`)
         const info = parts.length > 0 ? parts.join(', ') : 'Ingen nye endringer'
         setStatus(`Ferdig (${formatElapsed(now)}) — ${info}`)
+      } else if (parts.length > 0 || errors.length > 0) {
+        // Partial success — some steps worked, some failed
+        const successInfo = parts.length > 0 ? parts.join(', ') : 'Synkronisert'
+        const errorInfo = errors.length > 0 ? ` | Feil: ${errors.join('; ')}` : ''
+        setStatus(`Delvis fullført (${formatElapsed(now)}) — ${successInfo}${errorInfo}`)
       } else {
         setStatus(data.error || 'Synkronisering feilet')
       }

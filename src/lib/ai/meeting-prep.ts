@@ -14,7 +14,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { getAnthropicClient } from './anthropic'
+import { createMessageWithRetry } from './anthropic'
 
 export interface MeetingPrepResult {
   generated: number
@@ -51,8 +51,6 @@ export async function generateMeetingPreps(
       },
     },
   })
-
-  const anthropic = getAnthropicClient()
 
   for (const meeting of meetings) {
     // Collect attendee emails for matching
@@ -186,7 +184,7 @@ Svar med BARE JSON:
 }`
 
     try {
-      const response = await anthropic.messages.create({
+      const response = await createMessageWithRetry({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1000,
         messages: [{ role: 'user', content: prompt }],

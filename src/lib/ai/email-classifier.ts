@@ -12,7 +12,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { getAnthropicClient } from './anthropic'
+import { createMessageWithRetry } from './anthropic'
 import { logAiCall } from './log'
 
 // ---------------------------------------------------------------------------
@@ -126,8 +126,6 @@ export async function classifyEmails(userId: string): Promise<{
       return `- ${p.shortCode || p.name} (ID: ${p.id}): ${p.name}${p.byggherre ? `, byggherre: ${p.byggherre}` : ''}${terms ? `, søkeord: ${terms}` : ''}${monitors ? `, kontakter: ${monitors}` : ''}`
     })
     .join('\n')
-
-  const anthropic = getAnthropicClient()
 
   // ---------------------------------------------------------------------------
   // Helper: score-match an email against projects (no DB calls)
@@ -349,7 +347,7 @@ Regler:
 - Match prosjekt basert på innhold, avsender, emne, og prosjektenes søkeord/kontakter
 - "isPrivate": true hvis e-posten er tydelig privat (familie, helse, personlig økonomi, fritid etc.), false for jobb-relatert`
 
-  const response = await anthropic.messages.create({
+  const response = await createMessageWithRetry({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],

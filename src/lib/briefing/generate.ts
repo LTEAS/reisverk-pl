@@ -7,7 +7,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { getAnthropicClient } from '@/lib/ai/anthropic'
+import { createMessageWithRetry } from '@/lib/ai/anthropic'
 import { logAiCall } from '@/lib/ai/log'
 
 export interface BriefingResult {
@@ -542,8 +542,7 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
       )
     : buildInitialPrompt(state)
 
-  const anthropic = getAnthropicClient()
-  const response = await anthropic.messages.create({
+  const response = await createMessageWithRetry({
     model: BRIEFING_MODEL,
     max_tokens: 8000,
     messages: [{ role: 'user', content: prompt }],

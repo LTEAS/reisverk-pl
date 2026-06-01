@@ -124,12 +124,19 @@ export async function POST(request: Request) {
   // 6. Generate briefing
   try {
     pipeline.briefing = await generateBriefing(userId)
-    return NextResponse.json({ ok: true, ...pipeline })
   } catch (err: any) {
     console.error('Briefing generation failed:', err)
-    return NextResponse.json(
-      { error: err.message || 'Briefing generation failed', ...pipeline },
-      { status: 500 }
-    )
+    pipeline.briefing = { error: err.message || 'Briefing generation failed' }
   }
+
+  // Return 200 with whatever succeeded — don't fail the whole pipeline
+  // just because one step (e.g. briefing AI) had a connection error
+  const hasAnyError = Object.values(pipeline).some(
+    (v: any) => v && typeof v === 'object' && 'error' in v
+  )
+  return NextResponse.json({
+    ok: !hasAnyError,
+    ...(hasAnyError ? { warning: 'Noen steg feilet — se detaljer per steg' } : {}),
+    ...pipeline,
+  })
 }
