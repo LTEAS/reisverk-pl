@@ -1,16 +1,13 @@
 /**
  * POST /api/briefing/refresh
  *
- * Full refresh triggered by dashboard button:
- *   1. Sync email
- *   2. Sync calendar (3 weeks ahead)
- *   3. Classify new emails (AI)
- *   4. Auto-close tasks (reply detection)
- *   5. Meeting prep (incremental, 3 weeks ahead)
- *   6. Generate/update briefing
+ * Sync + classify returns immediately.
+ * Briefing generation runs AFTER the response is sent (via after()).
+ * Dashboard polls /api/briefing/status to check when briefing is ready.
  */
 
 import { NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { syncEmails } from '@/lib/microsoft/email-sync'
 import { syncCalendar } from '@/lib/microsoft/calendar-sync'
@@ -20,7 +17,7 @@ import { generateMeetingPreps } from '@/lib/ai/meeting-prep'
 import { generateBriefing } from '@/lib/briefing/generate'
 import { prisma } from '@/lib/prisma'
 
-export const maxDuration = 600 // 10 min — Pro plan supports up to 800s
+export const maxDuration = 300
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -37,7 +34,7 @@ export async function POST(request: Request) {
   const url = new URL(request.url)
   const forceReset = url.searchParams.get('reset') === 'true'
 
-  // 1+2. Email & calendar sync
+  // 1+2. Email & calendar sync (fast — no AI)
   const msAccount = await prisma.microsoftAccount.findUnique({
     where: { userId },
     select: { refreshToken: true },
@@ -51,7 +48,6 @@ export async function POST(request: Request) {
       pipeline.sync = { error: err.message }
     }
 
-    // Calendar sync
     try {
       pipeline.calendar = await syncCalendar(userId)
     } catch (err: any) {
@@ -60,44 +56,29 @@ export async function POST(request: Request) {
     }
   }
 
-  // 3-5. Run classification, auto-close, and meeting prep in PARALLEL
-  // This cuts total time significantly since each makes independent AI calls
+  // 3-5. Classification, auto-close, meeting prep in parallel
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  // Prepare classification reset if needed (quick DB ops, run before parallel)
   if (forceReset) {
-    const deleted = await prisma.aiSuggestion.deleteMany({
-      where: { status: 'pending' },
-    })
+    const deleted = await prisma.aiSuggestion.deleteMany({ where: { status: 'pending' } })
     const resetResult = await prisma.email.updateMany({
-      where: {
-        userId,
-        aiProcessedAt: { not: null },
-        receivedAt: { gte: sevenDaysAgo },
-      },
+      where: { userId, aiProcessedAt: { not: null }, receivedAt: { gte: sevenDaysAgo } },
       data: { aiProcessedAt: null },
     })
     pipeline.reclassifyReset = resetResult.count
     pipeline.suggestionsDeleted = deleted.count
   } else {
     const existingSuggestions = await prisma.aiSuggestion.count()
-    const existingAiTasks = await prisma.task.count({
-      where: { createdBy: userId, source: 'ai_email' },
-    })
+    const existingAiTasks = await prisma.task.count({ where: { createdBy: userId, source: 'ai_email' } })
     if (existingSuggestions === 0 && existingAiTasks === 0) {
       const resetResult = await prisma.email.updateMany({
-        where: {
-          userId,
-          aiProcessedAt: { not: null },
-          receivedAt: { gte: sevenDaysAgo },
-        },
+        where: { userId, aiProcessedAt: { not: null }, receivedAt: { gte: sevenDaysAgo } },
         data: { aiProcessedAt: null },
       })
       pipeline.reclassifyReset = resetResult.count
     }
   }
 
-  // Run all three in parallel
   const [classificationResult, autoCloseResult, meetingPrepResult] =
     await Promise.allSettled([
       classifyEmails(userId),
@@ -118,24 +99,22 @@ export async function POST(request: Request) {
       ? meetingPrepResult.value
       : { error: (meetingPrepResult as PromiseRejectedResult).reason?.message }
 
-  // Check if AI is reachable based on classification result
-  const aiAvailable = classificationResult.status === 'fulfilled' ||
-    !((classificationResult as PromiseRejectedResult).reason?.message?.includes('Connection error'))
+  // 6. Briefing — runs AFTER response is sent back to the browser
+  // This way the user sees sync results immediately, and the briefing
+  // appears on the dashboard when it's ready (page refresh)
+  pipeline.briefing = { generating: true, message: 'Briefing genereres i bakgrunnen...' }
 
-  // 6. Generate briefing (AI) — skip if AI is down
-  if (aiAvailable) {
+  after(async () => {
     try {
-      pipeline.briefing = await generateBriefing(userId)
+      console.log('Background: generating briefing for', userId)
+      await generateBriefing(userId)
+      console.log('Background: briefing generated successfully')
     } catch (err: any) {
-      console.error('Briefing generation failed:', err)
-      pipeline.briefing = { error: err.message || 'Briefing generation failed' }
+      console.error('Background briefing failed:', err.message)
     }
-  } else {
-    pipeline.briefing = { skipped: true, reason: 'AI utilgjengelig' }
-  }
+  })
 
-  // Return 200 with whatever succeeded — don't fail the whole pipeline
-  // just because one step (e.g. briefing AI) had a connection error
+  // Return immediately with sync results
   const hasAnyError = Object.values(pipeline).some(
     (v: any) => v && typeof v === 'object' && 'error' in v
   )

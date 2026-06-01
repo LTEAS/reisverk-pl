@@ -79,28 +79,46 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (data.classification?.suggestionsCreated) parts.push(`${data.classification.suggestionsCreated} forslag`)
       if (data.autoClose?.tasksUpdated) parts.push(`${data.autoClose.tasksUpdated} auto-oppdatert`)
 
-      // Collect step-level errors
+      // Collect step-level errors (ignore briefing — it runs in background)
       const errors: string[] = []
       if (data.sync?.error) errors.push(`e-post: ${data.sync.error}`)
       if (data.calendar?.error) errors.push(`kalender: ${data.calendar.error}`)
       if (data.classification?.error) errors.push(`klassifisering: ${data.classification.error}`)
       if (data.autoClose?.error) errors.push(`auto-lukking: ${data.autoClose.error}`)
       if (data.meetingPrep?.error) errors.push(`møteforberedelse: ${data.meetingPrep.error}`)
-      if (data.briefing?.error) errors.push(`briefing: ${data.briefing.error}`)
 
-      if (data.ok) {
+      const briefingGenerating = data.briefing?.generating === true
+
+      if (errors.length === 0) {
         const info = parts.length > 0 ? parts.join(', ') : 'Ingen nye endringer'
-        setStatus(`Ferdig (${formatElapsed(now)}) — ${info}`)
-      } else if (parts.length > 0 || errors.length > 0) {
-        // Partial success — some steps worked, some failed
-        const successInfo = parts.length > 0 ? parts.join(', ') : 'Synkronisert'
-        const errorInfo = errors.length > 0 ? ` | Feil: ${errors.join('; ')}` : ''
-        setStatus(`Delvis fullført (${formatElapsed(now)}) — ${successInfo}${errorInfo}`)
+        const briefingNote = briefingGenerating ? ' | Briefing genereres...' : ''
+        setStatus(`Ferdig (${formatElapsed(now)}) — ${info}${briefingNote}`)
       } else {
-        setStatus(data.error || 'Synkronisering feilet')
+        const successInfo = parts.length > 0 ? parts.join(', ') : 'Synkronisert'
+        const errorInfo = ` | Feil: ${errors.join('; ')}`
+        setStatus(`Delvis fullført (${formatElapsed(now)}) — ${successInfo}${errorInfo}`)
       }
 
       router.refresh()
+
+      // Poll for briefing completion if it's generating in background
+      if (briefingGenerating) {
+        const briefingBefore = new Date().toISOString()
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch('/api/briefing/status')
+            const statusData = await statusRes.json()
+            if (statusData.ready && statusData.generatedAt > briefingBefore) {
+              clearInterval(pollInterval)
+              setStatus((prev) => prev?.replace(' | Briefing genereres...', '') + ' | Briefing klar!')
+              router.refresh()
+              setTimeout(() => setStatus(null), 8000)
+            }
+          } catch { /* ignore polling errors */ }
+        }, 10_000) // Poll every 10s
+        // Stop polling after 5 min
+        setTimeout(() => clearInterval(pollInterval), 300_000)
+      }
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         setStatus('Nettverksfeil')
