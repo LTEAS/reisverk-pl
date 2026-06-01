@@ -542,11 +542,14 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
       )
     : buildInitialPrompt(state)
 
-  const response = await createMessageWithRetry({
-    model: BRIEFING_MODEL,
-    max_tokens: 8000,
-    messages: [{ role: 'user', content: prompt }],
-  })
+  const response = await createMessageWithRetry(
+    {
+      model: BRIEFING_MODEL,
+      max_tokens: 8000,
+      messages: [{ role: 'user', content: prompt }],
+    },
+    { timeoutMs: 120_000 } // Opus briefing needs up to 2 min
+  )
 
   const rawText =
     response.content[0].type === 'text'

@@ -60,12 +60,14 @@ export async function POST(request: Request) {
     }
   }
 
+  // Track whether AI/Anthropic is reachable — skip remaining AI steps if not
+  let aiAvailable = true
+
   // 3. Classify new emails
   try {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
     if (forceReset) {
-      // Delete pending suggestions and reset all emails for reclassification
       const deleted = await prisma.aiSuggestion.deleteMany({
         where: { status: 'pending' },
       })
@@ -80,7 +82,6 @@ export async function POST(request: Request) {
       pipeline.reclassifyReset = resetResult.count
       pipeline.suggestionsDeleted = deleted.count
     } else {
-      // Check if we need a full reclassification (no suggestions exist yet)
       const existingSuggestions = await prisma.aiSuggestion.count()
       const existingAiTasks = await prisma.task.count({
         where: { createdBy: userId, source: 'ai_email' },
@@ -101,11 +102,14 @@ export async function POST(request: Request) {
 
     pipeline.classification = await classifyEmails(userId)
   } catch (err: any) {
-    console.error('Classification failed:', err.message, err.stack)
+    console.error('Classification failed:', err.message)
     pipeline.classification = { error: err.message }
+    if (err.message?.includes('Connection error') || err.message?.includes('invalid header')) {
+      aiAvailable = false
+    }
   }
 
-  // 4. Auto-close tasks
+  // 4. Auto-close tasks (no AI call — always runs)
   try {
     pipeline.autoClose = await autoCloseTasks(userId)
   } catch (err: any) {
@@ -113,20 +117,29 @@ export async function POST(request: Request) {
     pipeline.autoClose = { error: err.message }
   }
 
-  // 5. Meeting prep (incremental — all meetings next 3 weeks)
-  try {
-    pipeline.meetingPrep = await generateMeetingPreps(userId)
-  } catch (err: any) {
-    console.error('Meeting prep failed:', err.message)
-    pipeline.meetingPrep = { error: err.message }
+  // 5. Meeting prep (AI) — skip if AI is down
+  if (aiAvailable) {
+    try {
+      pipeline.meetingPrep = await generateMeetingPreps(userId)
+    } catch (err: any) {
+      console.error('Meeting prep failed:', err.message)
+      pipeline.meetingPrep = { error: err.message }
+      if (err.message?.includes('Connection error')) aiAvailable = false
+    }
+  } else {
+    pipeline.meetingPrep = { skipped: true, reason: 'AI utilgjengelig' }
   }
 
-  // 6. Generate briefing
-  try {
-    pipeline.briefing = await generateBriefing(userId)
-  } catch (err: any) {
-    console.error('Briefing generation failed:', err)
-    pipeline.briefing = { error: err.message || 'Briefing generation failed' }
+  // 6. Generate briefing (AI) — skip if AI is down
+  if (aiAvailable) {
+    try {
+      pipeline.briefing = await generateBriefing(userId)
+    } catch (err: any) {
+      console.error('Briefing generation failed:', err)
+      pipeline.briefing = { error: err.message || 'Briefing generation failed' }
+    }
+  } else {
+    pipeline.briefing = { skipped: true, reason: 'AI utilgjengelig' }
   }
 
   // Return 200 with whatever succeeded — don't fail the whole pipeline
