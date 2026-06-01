@@ -32,8 +32,8 @@ async function fetchCurrentState(userId: string) {
   today.setHours(0, 0, 0, 0)
   const tomorrow = new Date(today)
   tomorrow.setDate(tomorrow.getDate() + 1)
-  // 7 days back to capture weekly context (like the Cowork assistant)
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  // Only last 2 days — historical context comes from previous briefing
+  const twoDaysBack = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000)
   const twoDaysAhead = new Date(today)
   twoDaysAhead.setDate(twoDaysAhead.getDate() + 2)
 
@@ -47,15 +47,15 @@ async function fetchCurrentState(userId: string) {
     projects,
     activeReminders,
   ] = await Promise.all([
-    // Last 7 days of emails (non-noise) — more context for Opus
+    // Last 2 days of emails — context comes from previous briefing
     prisma.email.findMany({
       where: {
         userId,
-        receivedAt: { gte: weekAgo },
+        receivedAt: { gte: twoDaysBack },
         noiseScore: { lt: 40 },
       },
       orderBy: { receivedAt: 'desc' },
-      take: 80,
+      take: 30,
       select: {
         subject: true,
         senderName: true,
@@ -157,6 +157,12 @@ async function fetchCurrentState(userId: string) {
       },
       orderBy: { remindAt: 'asc' },
     }),
+    // Previous briefing — accumulated project context
+    prisma.dailyBriefing.findFirst({
+      where: { userId, briefingDate: { lt: today } },
+      orderBy: { briefingDate: 'desc' },
+      select: { summary: true, briefingDate: true },
+    }),
   ])
 
   return {
@@ -170,6 +176,7 @@ async function fetchCurrentState(userId: string) {
     upcomingDeadlines,
     projects,
     activeReminders,
+    previousBriefing,
   }
 }
 
@@ -228,7 +235,7 @@ function formatTasks(tasks: any[]): string {
 // ---------------------------------------------------------------------------
 
 function buildInitialPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>): string {
-  const { now, recentEmails, todayMeetings, openTasks, overdueTasks, unansweredEmails, upcomingDeadlines, projects, activeReminders } = state
+  const { now, recentEmails, todayMeetings, openTasks, overdueTasks, unansweredEmails, upcomingDeadlines, projects, activeReminders, previousBriefing } = state
 
   // Build project context
   const projectContext = projects
@@ -257,7 +264,7 @@ function buildInitialPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>
           const att = e.hasAttachments ? ' 📎' : ''
           const reply = e.replyStatus === 'needs_reply' ? ' ⚠TRENGER_SVAR' : e.replyStatus === 'awaiting_reply' ? ' ⏳VENTER_SVAR' : ''
           const date = e.receivedAt ? e.receivedAt.toLocaleDateString('nb-NO', { day: 'numeric', month: 'short' }) : ''
-          const body = (e.bodyText || e.bodyPreview || '').slice(0, 500)
+          const body = (e.bodyText || e.bodyPreview || '').slice(0, 300)
           const aiNote = e.aiSummary ? `\n    AI-oppsummering: ${e.aiSummary}` : ''
           const actionNote = e.aiActionNeeded && e.aiActionDesc ? `\n    Handling: ${e.aiActionDesc}` : ''
           return `  ${dir} ${date}: "${e.subject}" — ${e.senderName || e.senderEmail}${att}${reply}\n    ${body}${aiNote}${actionNote}`
@@ -296,22 +303,27 @@ function buildInitialPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>
     })
     .join('\n')
 
+  // Previous briefing as accumulated context
+  const previousContext = previousBriefing?.summary
+    ? `\n===== FORRIGE BRIEFING (${previousBriefing.briefingDate.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' })}) =====\nDette er konteksten fra forrige gjennomgang. Bruk den som bakgrunn — ikke gjenta den, men bygg videre på den. Fokuser på HVA SOM ER NYTT siden da.\n${previousBriefing.summary.slice(0, 4000)}\n===== SLUTT FORRIGE BRIEFING =====\n`
+    : ''
+
   return `Du er prosjektgjennomgangs-AI for en byggeprosjektleder i Norge. Generer en DETALJERT daglig prosjektgjennomgang på norsk (bokmål).
 
 DATO: ${now.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
 
 BRUKERENS PROSJEKTER:
 ${projectContext || 'Ingen prosjekter definert'}
-
+${previousContext}
 STATISTIKK:
-- E-poster siste uke: ${recentEmails.length}
+- Nye e-poster siste 2 dager: ${recentEmails.length}
 - Møter i dag: ${todayMeetings.length}
 - Åpne oppgaver: ${openTasks.length}
 - Forfalte oppgaver: ${overdueTasks}
 - Ubesvarte e-poster: ${unansweredEmails}
 - Frister neste 2 dager: ${upcomingDeadlines.length}
 
-===== E-POSTER PER PROSJEKT (siste 7 dager) =====
+===== NYE E-POSTER (siste 2 dager) =====
 ${projectSections || 'Ingen e-poster'}
 
 ===== DAGENS MØTER =====
