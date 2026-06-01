@@ -46,6 +46,7 @@ async function fetchCurrentState(userId: string) {
     upcomingDeadlines,
     projects,
     activeReminders,
+    previousBriefing,
   ] = await Promise.all([
     // Last 2 days of emails — context comes from previous briefing
     prisma.email.findMany({
