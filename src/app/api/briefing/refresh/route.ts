@@ -20,7 +20,7 @@ import { generateMeetingPreps } from '@/lib/ai/meeting-prep'
 import { generateBriefing } from '@/lib/briefing/generate'
 import { prisma } from '@/lib/prisma'
 
-export const maxDuration = 300
+export const maxDuration = 600 // 10 min — Pro plan supports up to 800s
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -60,17 +60,31 @@ export async function POST(request: Request) {
     }
   }
 
-  // Track whether AI/Anthropic is reachable — skip remaining AI steps if not
-  let aiAvailable = true
+  // 3-5. Run classification, auto-close, and meeting prep in PARALLEL
+  // This cuts total time significantly since each makes independent AI calls
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  // 3. Classify new emails
-  try {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-    if (forceReset) {
-      const deleted = await prisma.aiSuggestion.deleteMany({
-        where: { status: 'pending' },
-      })
+  // Prepare classification reset if needed (quick DB ops, run before parallel)
+  if (forceReset) {
+    const deleted = await prisma.aiSuggestion.deleteMany({
+      where: { status: 'pending' },
+    })
+    const resetResult = await prisma.email.updateMany({
+      where: {
+        userId,
+        aiProcessedAt: { not: null },
+        receivedAt: { gte: sevenDaysAgo },
+      },
+      data: { aiProcessedAt: null },
+    })
+    pipeline.reclassifyReset = resetResult.count
+    pipeline.suggestionsDeleted = deleted.count
+  } else {
+    const existingSuggestions = await prisma.aiSuggestion.count()
+    const existingAiTasks = await prisma.task.count({
+      where: { createdBy: userId, source: 'ai_email' },
+    })
+    if (existingSuggestions === 0 && existingAiTasks === 0) {
       const resetResult = await prisma.email.updateMany({
         where: {
           userId,
@@ -80,55 +94,33 @@ export async function POST(request: Request) {
         data: { aiProcessedAt: null },
       })
       pipeline.reclassifyReset = resetResult.count
-      pipeline.suggestionsDeleted = deleted.count
-    } else {
-      const existingSuggestions = await prisma.aiSuggestion.count()
-      const existingAiTasks = await prisma.task.count({
-        where: { createdBy: userId, source: 'ai_email' },
-      })
-
-      if (existingSuggestions === 0 && existingAiTasks === 0) {
-        const resetResult = await prisma.email.updateMany({
-          where: {
-            userId,
-            aiProcessedAt: { not: null },
-            receivedAt: { gte: sevenDaysAgo },
-          },
-          data: { aiProcessedAt: null },
-        })
-        pipeline.reclassifyReset = resetResult.count
-      }
-    }
-
-    pipeline.classification = await classifyEmails(userId)
-  } catch (err: any) {
-    console.error('Classification failed:', err.message)
-    pipeline.classification = { error: err.message }
-    if (err.message?.includes('Connection error') || err.message?.includes('invalid header')) {
-      aiAvailable = false
     }
   }
 
-  // 4. Auto-close tasks (no AI call — always runs)
-  try {
-    pipeline.autoClose = await autoCloseTasks(userId)
-  } catch (err: any) {
-    console.error('Auto-close failed:', err.message)
-    pipeline.autoClose = { error: err.message }
-  }
+  // Run all three in parallel
+  const [classificationResult, autoCloseResult, meetingPrepResult] =
+    await Promise.allSettled([
+      classifyEmails(userId),
+      autoCloseTasks(userId),
+      generateMeetingPreps(userId),
+    ])
 
-  // 5. Meeting prep (AI) — skip if AI is down
-  if (aiAvailable) {
-    try {
-      pipeline.meetingPrep = await generateMeetingPreps(userId)
-    } catch (err: any) {
-      console.error('Meeting prep failed:', err.message)
-      pipeline.meetingPrep = { error: err.message }
-      if (err.message?.includes('Connection error')) aiAvailable = false
-    }
-  } else {
-    pipeline.meetingPrep = { skipped: true, reason: 'AI utilgjengelig' }
-  }
+  pipeline.classification =
+    classificationResult.status === 'fulfilled'
+      ? classificationResult.value
+      : { error: (classificationResult as PromiseRejectedResult).reason?.message }
+  pipeline.autoClose =
+    autoCloseResult.status === 'fulfilled'
+      ? autoCloseResult.value
+      : { error: (autoCloseResult as PromiseRejectedResult).reason?.message }
+  pipeline.meetingPrep =
+    meetingPrepResult.status === 'fulfilled'
+      ? meetingPrepResult.value
+      : { error: (meetingPrepResult as PromiseRejectedResult).reason?.message }
+
+  // Check if AI is reachable based on classification result
+  const aiAvailable = classificationResult.status === 'fulfilled' ||
+    !((classificationResult as PromiseRejectedResult).reason?.message?.includes('Connection error'))
 
   // 6. Generate briefing (AI) — skip if AI is down
   if (aiAvailable) {
