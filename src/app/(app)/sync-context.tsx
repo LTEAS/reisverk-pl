@@ -96,23 +96,20 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       router.refresh()
 
       // Step 2: Generate briefing in separate request (can take 2+ min)
-      const briefingBefore = new Date().toISOString()
-      fetch('/api/briefing/generate', { method: 'POST' })
-        .then((r) => r.json())
-        .then((briefingData) => {
-          console.log('Briefing response:', JSON.stringify(briefingData, null, 2))
-          if (briefingData.ok) {
-            setStatus((prev) => (prev || '').replace(' | Genererer briefing...', '') + ' | Briefing klar!')
-          } else {
-            setStatus((prev) => (prev || '').replace(' | Genererer briefing...', '') + ` | Briefing feil: ${briefingData.error}`)
-          }
-          router.refresh()
-          setTimeout(() => setStatus(null), 10000)
-        })
-        .catch(() => {
-          setStatus((prev) => (prev || '').replace(' | Genererer briefing...', '') + ' | Briefing tidsavbrudd — prøv igjen')
-          setTimeout(() => setStatus(null), 10000)
-        })
+      // Keep loading/timer running until briefing is done
+      try {
+        const briefingRes = await fetch('/api/briefing/generate', { method: 'POST' })
+        const briefingData = await briefingRes.json()
+        console.log('Briefing response:', JSON.stringify(briefingData, null, 2))
+        if (briefingData.ok) {
+          setStatus(`Ferdig (${formatElapsed(now)}) — ${info} | Briefing klar!`)
+        } else {
+          setStatus(`Ferdig (${formatElapsed(now)}) — ${info} | Briefing feil: ${briefingData.error}`)
+        }
+        router.refresh()
+      } catch {
+        setStatus(`Ferdig (${formatElapsed(now)}) — ${info} | Briefing tidsavbrudd — prøv igjen`)
+      }
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         setStatus('Nettverksfeil')
@@ -121,7 +118,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
       setStartTime(null)
       abortRef.current = null
-      setTimeout(() => setStatus(null), 20000)
+      setTimeout(() => setStatus(null), 15000)
     }
   }, [loading, router])
 
