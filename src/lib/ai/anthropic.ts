@@ -8,7 +8,10 @@ let client: Anthropic | null = null;
  */
 export function getAnthropicClient(): Anthropic {
   if (!client) {
-    client = new Anthropic();
+    client = new Anthropic({
+      timeout: 30_000, // 30s per request — fail fast instead of hanging
+      maxRetries: 0,   // We handle retries ourselves
+    });
   }
   return client;
 }
@@ -16,10 +19,11 @@ export function getAnthropicClient(): Anthropic {
 /**
  * Call Anthropic messages.create with automatic retry on transient errors
  * (connection errors, timeouts, 529 overloaded).
+ * Retries twice with short delays (1s, 2s) to stay within Vercel timeouts.
  */
 export async function createMessageWithRetry(
   params: Anthropic.Messages.MessageCreateParamsNonStreaming,
-  maxRetries = 3
+  maxRetries = 2
 ): Promise<Anthropic.Messages.Message> {
   const anthropic = getAnthropicClient()
 
@@ -35,7 +39,7 @@ export async function createMessageWithRetry(
         err.status === 529 || // Anthropic overloaded
         err.status === 503    // Service unavailable
       if (isRetryable && attempt < maxRetries) {
-        const delay = attempt * 2000
+        const delay = attempt * 1000
         console.warn(
           `Anthropic API attempt ${attempt}/${maxRetries} failed: ${err.message}. Retrying in ${delay}ms...`
         )
@@ -46,6 +50,5 @@ export async function createMessageWithRetry(
     }
   }
 
-  // TypeScript: unreachable, but satisfies the compiler
   throw new Error('Retry loop exited unexpectedly')
 }
