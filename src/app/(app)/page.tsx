@@ -13,6 +13,7 @@ import { DashboardSuggestions } from './dashboard-suggestions'
 import { BriefingSection } from './dashboard-briefing'
 import { DashboardChat } from './dashboard-chat'
 import { Onboarding } from './onboarding'
+import { ReminderActions } from './reminder-actions'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -359,7 +360,7 @@ export default async function DashboardPage() {
                   return (
                     <li
                       key={r.id}
-                      className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-[#2a2827] transition-colors"
+                      className="group flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-[#2a2827] transition-colors"
                     >
                       <div className={`flex flex-col items-center justify-center rounded-lg px-2.5 py-1.5 min-w-[52px] ${isPast ? 'bg-red-500/10' : 'bg-[#2a2827]'}`}>
                         <span className={`text-xs font-medium ${isPast ? 'text-red-400' : 'text-white'}`}>
@@ -386,6 +387,7 @@ export default async function DashboardPage() {
                           )}
                         </div>
                       </div>
+                      <ReminderActions reminderId={r.id} />
                     </li>
                   )
                 })}
