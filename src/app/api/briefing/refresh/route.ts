@@ -1,20 +1,17 @@
 /**
  * POST /api/briefing/refresh
  *
- * Sync + classify returns immediately.
- * Briefing generation runs AFTER the response is sent (via after()).
- * Dashboard polls /api/briefing/status to check when briefing is ready.
+ * Sync + classify only. Returns fast.
+ * Frontend then calls /api/briefing/generate separately for briefing.
  */
 
 import { NextResponse } from 'next/server'
-import { after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { syncEmails } from '@/lib/microsoft/email-sync'
 import { syncCalendar } from '@/lib/microsoft/calendar-sync'
 import { classifyEmails } from '@/lib/ai/email-classifier'
 import { autoCloseTasks } from '@/lib/ai/task-auto-close'
 import { generateMeetingPreps } from '@/lib/ai/meeting-prep'
-import { generateBriefing } from '@/lib/briefing/generate'
 import { prisma } from '@/lib/prisma'
 
 export const maxDuration = 300
@@ -99,22 +96,7 @@ export async function POST(request: Request) {
       ? meetingPrepResult.value
       : { error: (meetingPrepResult as PromiseRejectedResult).reason?.message }
 
-  // 6. Briefing — runs AFTER response is sent back to the browser
-  // This way the user sees sync results immediately, and the briefing
-  // appears on the dashboard when it's ready (page refresh)
-  pipeline.briefing = { generating: true, message: 'Briefing genereres i bakgrunnen...' }
-
-  after(async () => {
-    try {
-      console.log('Background: generating briefing for', userId)
-      await generateBriefing(userId)
-      console.log('Background: briefing generated successfully')
-    } catch (err: any) {
-      console.error('Background briefing failed:', err.message)
-    }
-  })
-
-  // Return immediately with sync results
+  // Return sync results — frontend calls /api/briefing/generate separately
   const hasAnyError = Object.values(pipeline).some(
     (v: any) => v && typeof v === 'object' && 'error' in v
   )
