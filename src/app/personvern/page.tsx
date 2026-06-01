@@ -66,10 +66,12 @@ export default function PersonvernPage() {
             <h2 className="text-lg font-semibold">4. AI-behandling</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
               Innhold fra e-post, kalender, oppgaver og chat sendes til
-              Anthropic (Claude) for AI-prosessering. Anthropic lagrer ikke
-              data fra API-kall for trening av modeller. Data sendes kryptert
-              (TLS) og behandles i henhold til Anthropics databehandleravtale.
-              Ingen andre brukere har tilgang til dine data.
+              Anthropic (Claude) for AI-prosessering. Dataene prosesseres
+              kun i sanntid for å generere svar — Anthropic lagrer ikke
+              innholdet og bruker det ikke til trening av AI-modeller eller
+              andre formål. Data sendes kryptert (TLS) og behandles i
+              henhold til Anthropics databehandleravtale. Ingen andre
+              brukere har tilgang til dine data.
             </p>
           </section>
 
