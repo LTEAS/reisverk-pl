@@ -575,8 +575,7 @@ VIKTIG: Ikke hopp over detaljer. Beløp, datoer, adresser, dokumentnavn, kontakt
 // Main export
 // ---------------------------------------------------------------------------
 
-const ANALYSIS_MODEL = 'claude-sonnet-4-6'   // Pass 1: reads all emails, fast
-const BRIEFING_MODEL = 'claude-opus-4-6'      // Pass 2: writes briefing from summaries
+const BRIEFING_MODEL = 'claude-sonnet-4-6'
 const BRIEFING_MONTHLY_LIMIT = 30
 
 export async function generateBriefing(userId: string): Promise<BriefingResult> {
@@ -584,7 +583,6 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
   const { now, today, todayMeetings, overdueTasks, unansweredEmails, recentEmails, projects } = state
 
   // Check monthly usage limit
-  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
@@ -592,7 +590,6 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
     where: {
       userId,
       purpose: { in: ['daily_briefing', 'briefing_update'] },
-      model: { in: [BRIEFING_MODEL, ANALYSIS_MODEL] },
       createdAt: { gte: monthStart, lt: monthEnd },
     },
   })
@@ -610,54 +607,13 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
 
   const isUpdate = !!(existingBriefing?.summary && existingBriefing?.generatedAt)
 
-  let response: Awaited<ReturnType<typeof createMessageWithRetry>>
+  const prompt = isUpdate
+    ? buildUpdatePrompt(existingBriefing!.summary!, existingBriefing!.generatedAt!, state)
+    : buildInitialPrompt(state)
 
-  if (isUpdate) {
-    // Updates go straight to Opus (smaller prompt — only new emails)
-    const prompt = buildUpdatePrompt(
-      existingBriefing!.summary!,
-      existingBriefing!.generatedAt!,
-      state
-    )
-    response = await createMessageWithRetry(
-      { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] },
-      { timeoutMs: 120_000 }
-    )
-  } else {
-    // --- Pass 1: Sonnet reads ALL emails and extracts structured analysis ---
-    console.log(`Briefing pass 1: Sonnet analyserer ${recentEmails.length} e-poster...`)
-    const analysisPrompt = buildAnalysisPrompt(state)
-    const analysisResponse = await createMessageWithRetry(
-      { model: ANALYSIS_MODEL, max_tokens: 4000, messages: [{ role: 'user', content: analysisPrompt }] },
-      { timeoutMs: 60_000 }
-    )
-    const analysisText = analysisResponse.content[0].type === 'text'
-      ? analysisResponse.content[0].text : '{}'
-
-    // Log the analysis call
-    await logAiCall({
-      userId,
-      purpose: 'briefing_analysis',
-      model: ANALYSIS_MODEL,
-      promptTokens: analysisResponse.usage.input_tokens,
-      completionTokens: analysisResponse.usage.output_tokens,
-      totalTokens: analysisResponse.usage.input_tokens + analysisResponse.usage.output_tokens,
-      durationMs: 0,
-      status: 'success',
-    })
-
-    // --- Pass 2: Opus writes the briefing from Sonnet's analysis ---
-    console.log('Briefing pass 2: Opus skriver briefing fra analyse...')
-    const briefingPrompt = buildInitialPrompt(state).replace(
-      /===== E-POSTER PER PROSJEKT \(siste 7 dager\) =====\n[\s\S]*?(?=\n===== DAGENS MØTER =====)/,
-      `===== SONNET-ANALYSE AV E-POSTER (siste 7 dager) =====\n${analysisText}\n\n`
-    )
-
-    response = await createMessageWithRetry(
-      { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: briefingPrompt }] },
-      { timeoutMs: 120_000 }
-    )
-  }
+  const response = await createMessageWithRetry(
+    { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] },
+  )
 
   const rawText =
     response.content[0].type === 'text'
