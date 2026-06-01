@@ -497,10 +497,86 @@ Vær konsis. Bare inkluder oppdateringsseksjonen i summary hvis det faktisk har 
 }
 
 // ---------------------------------------------------------------------------
+// Pass 1: Sonnet analyses all emails thoroughly
+// ---------------------------------------------------------------------------
+
+function buildAnalysisPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>): string {
+  const { now, recentEmails, projects } = state
+
+  const projectContext = projects
+    .filter((p) => p.shortCode !== 'GEN' && p.shortCode !== 'PRIVAT')
+    .map((p) => `- ${p.shortCode}: ${p.name}${p.byggherre ? ` (${p.byggherre})` : ''}`)
+    .join('\n')
+
+  // Full email content grouped by project
+  const emailsByProject = new Map<string, typeof recentEmails>()
+  for (const e of recentEmails) {
+    const proj = e.project?.shortCode || e.project?.name || 'Ukategorisert'
+    if (!emailsByProject.has(proj)) emailsByProject.set(proj, [])
+    emailsByProject.get(proj)!.push(e)
+  }
+
+  const emailSections = Array.from(emailsByProject.entries())
+    .map(([proj, emails]) => {
+      const emailList = emails
+        .map((e) => {
+          const dir = e.direction === 'outbound' ? 'SENDT' : 'MOTTATT'
+          const date = e.receivedAt?.toLocaleDateString('nb-NO', { day: 'numeric', month: 'short' }) || ''
+          const att = e.hasAttachments ? ' [VEDLEGG]' : ''
+          const reply = e.replyStatus === 'needs_reply' ? ' [TRENGER SVAR]' : e.replyStatus === 'awaiting_reply' ? ' [VENTER SVAR]' : ''
+          const body = (e.bodyText || e.bodyPreview || '').slice(0, 600)
+          return `${dir} ${date}: "${e.subject}" — ${e.senderName || e.senderEmail}${att}${reply}\n${body}`
+        })
+        .join('\n---\n')
+      return `[${proj}] (${emails.length} e-poster)\n${emailList}`
+    })
+    .join('\n\n=====\n\n')
+
+  return `Du er en erfaren analytiker for en byggeprosjektleder i Norge. Les GRUNDIG gjennom alle e-postene nedenfor og skriv en DETALJERT analyse per prosjekt.
+
+DATO: ${now.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+
+PROSJEKTER:
+${projectContext}
+
+E-POSTER SISTE 7 DAGER:
+${emailSections}
+
+INSTRUKSJONER — les hver e-post nøye og ekstraher:
+1. HENDELSER: Hva har faktisk skjedd? Vær spesifikk — datoer, beløp, dokumentnavn, stedsnavn.
+2. PERSONER: Hvem er involvert? Bruk fulle navn og firma (f.eks. "Ludvig Normann Hansen fra KEA", "Kjersti fra Griff Arkitektur").
+3. STATUS: Hva venter på svar? Hva pågår? Hva er avklart?
+4. HANDLINGSPUNKTER: Hva MÅ prosjektlederen gjøre? Prioriter: haster / viktig / kan vente.
+5. SAMMENHENGER: Koble relaterte e-poster — f.eks. en forespørsel og et svar i samme tråd.
+6. RISIKO: Er det noe som kan gå galt? Frister som nærmer seg? Ubesvarte henvendelser?
+
+Svar med JSON — en analyse per prosjekt:
+{
+  "projects": [
+    {
+      "code": "Prosjektkode",
+      "name": "Prosjektnavn",
+      "emailCount": 5,
+      "summary": "3-5 setningers oppsummering av status",
+      "keyEvents": ["Hendelse 1 med detaljer", "Hendelse 2"],
+      "people": ["Navn — rolle/firma — hva de gjør"],
+      "pendingActions": ["Handling som krever respons — kontekst"],
+      "risks": ["Risiko eller frist som nærmer seg"],
+      "openThreads": ["E-posttråd som venter på svar — fra hvem"]
+    }
+  ],
+  "uncategorized": "Kort om e-poster som ikke passer prosjekter"
+}
+
+VIKTIG: Ikke hopp over detaljer. Beløp, datoer, adresser, dokumentnavn, kontaktinfo — alt er relevant for prosjektlederen. Skriv på norsk.`
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
-const BRIEFING_MODEL = 'claude-sonnet-4-6'
+const ANALYSIS_MODEL = 'claude-sonnet-4-6'   // Pass 1: reads all emails, fast
+const BRIEFING_MODEL = 'claude-opus-4-6'      // Pass 2: writes briefing from summaries
 const BRIEFING_MONTHLY_LIMIT = 30
 
 export async function generateBriefing(userId: string): Promise<BriefingResult> {
@@ -516,7 +592,7 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
     where: {
       userId,
       purpose: { in: ['daily_briefing', 'briefing_update'] },
-      model: BRIEFING_MODEL,
+      model: { in: [BRIEFING_MODEL, ANALYSIS_MODEL] },
       createdAt: { gte: monthStart, lt: monthEnd },
     },
   })
@@ -534,22 +610,54 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
 
   const isUpdate = !!(existingBriefing?.summary && existingBriefing?.generatedAt)
 
-  const prompt = isUpdate
-    ? buildUpdatePrompt(
-        existingBriefing!.summary!,
-        existingBriefing!.generatedAt!,
-        state
-      )
-    : buildInitialPrompt(state)
+  let response: Awaited<ReturnType<typeof createMessageWithRetry>>
 
-  const response = await createMessageWithRetry(
-    {
-      model: BRIEFING_MODEL,
-      max_tokens: 8000,
-      messages: [{ role: 'user', content: prompt }],
-    },
-    { timeoutMs: 120_000 } // Opus briefing needs up to 2 min
-  )
+  if (isUpdate) {
+    // Updates go straight to Opus (smaller prompt — only new emails)
+    const prompt = buildUpdatePrompt(
+      existingBriefing!.summary!,
+      existingBriefing!.generatedAt!,
+      state
+    )
+    response = await createMessageWithRetry(
+      { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] },
+      { timeoutMs: 120_000 }
+    )
+  } else {
+    // --- Pass 1: Sonnet reads ALL emails and extracts structured analysis ---
+    console.log(`Briefing pass 1: Sonnet analyserer ${recentEmails.length} e-poster...`)
+    const analysisPrompt = buildAnalysisPrompt(state)
+    const analysisResponse = await createMessageWithRetry(
+      { model: ANALYSIS_MODEL, max_tokens: 4000, messages: [{ role: 'user', content: analysisPrompt }] },
+      { timeoutMs: 60_000 }
+    )
+    const analysisText = analysisResponse.content[0].type === 'text'
+      ? analysisResponse.content[0].text : '{}'
+
+    // Log the analysis call
+    await logAiCall({
+      userId,
+      purpose: 'briefing_analysis',
+      model: ANALYSIS_MODEL,
+      promptTokens: analysisResponse.usage.input_tokens,
+      completionTokens: analysisResponse.usage.output_tokens,
+      totalTokens: analysisResponse.usage.input_tokens + analysisResponse.usage.output_tokens,
+      durationMs: 0,
+      status: 'success',
+    })
+
+    // --- Pass 2: Opus writes the briefing from Sonnet's analysis ---
+    console.log('Briefing pass 2: Opus skriver briefing fra analyse...')
+    const briefingPrompt = buildInitialPrompt(state).replace(
+      /===== E-POSTER PER PROSJEKT \(siste 7 dager\) =====\n[\s\S]*?(?=\n===== DAGENS MØTER =====)/,
+      `===== SONNET-ANALYSE AV E-POSTER (siste 7 dager) =====\n${analysisText}\n\n`
+    )
+
+    response = await createMessageWithRetry(
+      { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: briefingPrompt }] },
+      { timeoutMs: 120_000 }
+    )
+  }
 
   const rawText =
     response.content[0].type === 'text'
