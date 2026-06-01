@@ -66,8 +66,8 @@ export function AppSidebar({ user, onNavigate }: AppSidebarProps) {
           className="shrink-0"
         />
         <div className="min-w-0">
-          <h1 className="text-[11px] font-semibold text-stone-300 tracking-widest uppercase leading-tight">Prosjektoppfølging</h1>
-          <p className="text-[10px] text-stone-600 leading-tight">Reisverk PL</p>
+          <h1 className="text-[11px] font-semibold text-stone-300 tracking-widest uppercase leading-tight">REISVERK</h1>
+          <p className="text-[10px] text-stone-500 leading-tight">Prosjektoppfølging</p>
         </div>
       </div>
 

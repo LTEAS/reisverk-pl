@@ -9,7 +9,7 @@ let client: Anthropic | null = null;
 export function getAnthropicClient(): Anthropic {
   if (!client) {
     client = new Anthropic({
-      timeout: 30_000, // 30s default — overridden per call when needed
+      timeout: 180_000, // 3 min — Opus briefing needs up to 2 min
       maxRetries: 0,   // We handle retries ourselves
     });
   }
