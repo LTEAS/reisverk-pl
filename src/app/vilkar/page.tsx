@@ -32,7 +32,7 @@ export default function VilkarPage() {
             <h2 className="text-lg font-semibold">1. Om tjenesten</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
               Reisverk Prosjektoppfølging (&laquo;tjenesten&raquo;) leveres av
-              HMT Prosjekt AS (org.nr. 930 953 048). Tjenesten er et AI-drevet
+              Reisverk AS (org.nr. 937 782 985). Tjenesten er et AI-drevet
               verktøy for prosjektoppfølging i byggebransjen, med funksjoner for
               oppgavehåndtering, e-postsammendrag, kalenderintegrasjon og
               AI-assistert rådgivning.
@@ -88,7 +88,7 @@ export default function VilkarPage() {
               sammendrag og anbefalinger. AI-generert innhold er veiledende
               og kan inneholde feil. Du er selv ansvarlig for å kontrollere
               og vurdere alle AI-genererte forslag før du handler på dem.
-              HMT Prosjekt AS er ikke ansvarlig for beslutninger tatt basert
+              Reisverk AS er ikke ansvarlig for beslutninger tatt basert
               på AI-generert innhold.
             </p>
           </section>
@@ -107,7 +107,7 @@ export default function VilkarPage() {
             <h2 className="text-lg font-semibold">8. Immaterielle rettigheter</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
               Du beholder alle rettigheter til data du legger inn i
-              tjenesten. HMT Prosjekt AS beholder alle rettigheter til
+              tjenesten. Reisverk AS beholder alle rettigheter til
               tjenestens programvare, design og funksjonalitet. Vi bruker
               ikke dine data til å trene AI-modeller.
             </p>
@@ -116,7 +116,7 @@ export default function VilkarPage() {
           <section>
             <h2 className="text-lg font-semibold">9. Ansvarsbegrensning</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              HMT Prosjekt AS er ikke ansvarlig for indirekte tap, tapt
+              Reisverk AS er ikke ansvarlig for indirekte tap, tapt
               fortjeneste eller følgeskader. Vårt samlede ansvar er
               begrenset til beløpet du har betalt for tjenesten de siste
               12 månedene.

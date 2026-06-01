@@ -31,11 +31,11 @@ export default function PersonvernPage() {
           <section>
             <h2 className="text-lg font-semibold">1. Behandlingsansvarlig</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              HMT Prosjekt AS (org.nr. 930 953 048) er behandlingsansvarlig for
+              Reisverk AS (org.nr. 937 782 985) er behandlingsansvarlig for
               personopplysninger som samles inn gjennom Reisverk
               Prosjektoppfølging (&laquo;tjenesten&raquo;). Kontakt:{' '}
-              <a href="mailto:tobias@hmtprosjekt.no" className="underline hover:text-foreground">
-                tobias@hmtprosjekt.no
+              <a href="mailto:post@reisverk.com" className="underline hover:text-foreground">
+                post@reisverk.com
               </a>
               .
             </p>
@@ -44,10 +44,14 @@ export default function PersonvernPage() {
           <section>
             <h2 className="text-lg font-semibold">2. Hvilke opplysninger vi samler inn</h2>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Ved registrering henter vi navn og e-postadresse fra din
-              Microsoft-konto. Når du kobler til Microsoft 365 gir du oss
-              lesetilgang til e-post og kalender. Vi lagrer også oppgaver,
-              prosjektdata og chatmeldinger du oppretter i tjenesten.
+              Ved registrering hentes navn og e-postadresse fra din
+              Microsoft-konto. Når du kobler til Microsoft 365 gis tjenesten
+              lesetilgang til e-post og kalender. Data lagres i en sikret
+              database som Reisverk AS ikke har manuell tilgang til — all
+              behandling skjer automatisk. E-postinnhold og kalenderdata
+              sendes til Anthropic (Claude) for AI-prosessering, men lagres
+              ikke hos Anthropic. Oppgaver, prosjektdata og chatmeldinger
+              du oppretter lagres også i databasen.
             </p>
           </section>
 
@@ -113,8 +117,8 @@ export default function PersonvernPage() {
               behandling og dataportabilitet. Du kan også trekke tilbake
               Microsoft 365-tilkoblingen når som helst under Innstillinger.
               For å utøve rettighetene dine, kontakt oss på{' '}
-              <a href="mailto:tobias@hmtprosjekt.no" className="underline hover:text-foreground">
-                tobias@hmtprosjekt.no
+              <a href="mailto:post@reisverk.com" className="underline hover:text-foreground">
+                post@reisverk.com
               </a>
               . Du har også rett til å klage til Datatilsynet.
             </p>
