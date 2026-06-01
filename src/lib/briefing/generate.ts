@@ -23,6 +23,12 @@ export interface BriefingResult {
 }
 
 // ---------------------------------------------------------------------------
+// Timezone — all times displayed in Norwegian time
+// ---------------------------------------------------------------------------
+const TZ = 'Europe/Oslo'
+const dateOpts = (opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions => ({ ...opts, timeZone: TZ })
+
+// ---------------------------------------------------------------------------
 // Shared: fetch current state
 // ---------------------------------------------------------------------------
 
@@ -203,10 +209,12 @@ function formatMeetings(meetings: any[]): string {
       const time = m.startsAt.toLocaleTimeString('nb-NO', {
         hour: '2-digit',
         minute: '2-digit',
+        timeZone: 'Europe/Oslo',
       })
       const endTime = m.endsAt.toLocaleTimeString('nb-NO', {
         hour: '2-digit',
         minute: '2-digit',
+        timeZone: 'Europe/Oslo',
       })
       const loc = m.isOnline ? 'Teams' : m.location || 'ukjent sted'
       const proj = m.project
@@ -339,7 +347,7 @@ ${deadlineList || 'Ingen frister de neste 2 dagene'}
 ===== PÅMINNELSER I DAG =====
 ${activeReminders.length > 0
   ? activeReminders.map((r) => {
-      const time = r.remindAt.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })
+      const time = r.remindAt.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })
       const rec = r.recurring ? ` (${r.recurring})` : ''
       return `- ${time}: ${r.title}${r.description ? ' — ' + r.description : ''}${rec}`
     }).join('\n')
@@ -465,8 +473,8 @@ function buildUpdatePrompt(
 
   return `Du er en AI-assistent for en byggeprosjektleder i Norge. Du har allerede generert en daglig briefing tidligere i dag. Nå skal du oppdatere den basert på hva som har skjedd siden da.
 
-TIDSPUNKT NÅ: ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
-BRIEFING GENERERT: ${generatedAt.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}
+TIDSPUNKT NÅ: ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}
+BRIEFING GENERERT: ${generatedAt.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}
 
 === EKSISTERENDE BRIEFING ===
 ${existingBriefing}
@@ -486,7 +494,7 @@ ${taskSections || 'Ingen åpne oppgaver'}
 
 Svar med BARE JSON (ingen annen tekst) i dette formatet:
 {
-  "summary": "Oppdatert briefing-tekst. Behold den opprinnelige morgenbriefingen men FJERN alle tidligere 'Oppdatering kl.'-seksjoner. Legg til én ny '---\\n\\n**Oppdatering kl. ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' })}**' seksjon nederst, organisert per prosjekt med nye e-poster, statusendringer, gjennomførte møter. Marker utførte ting med ✓. Kun ÉN oppdateringsseksjon totalt.",
+  "summary": "Oppdatert briefing-tekst. Behold den opprinnelige morgenbriefingen men FJERN alle tidligere 'Oppdatering kl.'-seksjoner. Legg til én ny '---\\n\\n**Oppdatering kl. ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}**' seksjon nederst, organisert per prosjekt med nye e-poster, statusendringer, gjennomførte møter. Marker utførte ting med ✓. Kun ÉN oppdateringsseksjon totalt.",
   "actionItems": [
     { "key": "unik-nøkkel", "text": "Kort handlingspunkt med prosjektreferanse" }
   ],
