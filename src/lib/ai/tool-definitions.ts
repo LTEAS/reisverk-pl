@@ -324,6 +324,18 @@ export const AI_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "delete_reminder",
+    description:
+      "Slett en påminnelse permanent. Bruk dette når brukeren vil fjerne en påminnelse helt, ikke bare markere den som fullført.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        reminder_id: { type: "string", description: "Påminnelse-ID" },
+      },
+      required: ["reminder_id"],
+    },
+  },
+  {
     name: "generate_reply_suggestion",
     description:
       "Generer et profesjonelt svarforslag på en e-post. Svaret skrives på norsk.",

@@ -809,6 +809,8 @@ export async function executeTool(
         return await listReminders(toolInput, userId);
       case "complete_reminder":
         return await completeReminder(toolInput, userId);
+      case "delete_reminder":
+        return await deleteReminder(toolInput, userId);
       default:
         return JSON.stringify({
           error: `Ukjent verktøy: ${toolName}`,
@@ -941,4 +943,28 @@ async function completeReminder(
       message: `Påminnelse "${reminder.title}" fullført`,
     });
   }
+}
+
+async function deleteReminder(
+  input: Input,
+  userId: string
+): Promise<string> {
+  const reminderId = str(input.reminder_id);
+  if (!reminderId) return JSON.stringify({ error: "Påminnelse-ID er påkrevd" });
+
+  const reminder = await prisma.reminder.findUnique({
+    where: { id: reminderId },
+  });
+
+  if (!reminder || reminder.userId !== userId)
+    return JSON.stringify({ error: "Påminnelse ikke funnet" });
+
+  await prisma.reminder.delete({
+    where: { id: reminderId },
+  });
+  revalidatePath("/");
+  return JSON.stringify({
+    success: true,
+    message: `Påminnelse "${reminder.title}" slettet`,
+  });
 }
