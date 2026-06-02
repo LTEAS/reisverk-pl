@@ -252,8 +252,12 @@ export async function classifyEmails(userId: string): Promise<{
     result.processed++
   }
 
-  // Process sequentially with rate-limit retry
-  for (const email of emails) {
+  // Process with bounded concurrency + per-email rate-limit retry.
+  // Sequential was safe but slow (one Sonnet call at a time); a small pool
+  // cuts wall-clock time ~CONCURRENCY-fold while still backing off on 429.
+  const CONCURRENCY = 4
+
+  async function processWithRetry(email: typeof emails[0]) {
     try {
       await processEmail(email)
     } catch (err: any) {
@@ -271,6 +275,20 @@ export async function classifyEmails(userId: string): Promise<{
       }
     }
   }
+
+  // Worker pool: each worker pulls the next email off a shared cursor.
+  // The cursor read-and-increment is synchronous (no await between), so it is
+  // race-safe in single-threaded Node.
+  let cursor = 0
+  async function worker() {
+    while (cursor < emails.length) {
+      const email = emails[cursor++]
+      await processWithRetry(email)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, emails.length) }, worker)
+  )
 
   // Log the batch (with cost calculation + monthly usage update)
   if (totalInputTokens > 0 || totalOutputTokens > 0) {
