@@ -69,9 +69,9 @@ export function ProjectGrid({ projects }: { projects: ProjectData[] }) {
       {showNew && <NewProjectForm onClose={() => setShowNew(false)} />}
 
       {projects.length > 0 ? (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-1.5">
           {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+            <ProjectRow key={project.id} project={project} />
           ))}
         </div>
       ) : (
@@ -92,63 +92,43 @@ export function ProjectGrid({ projects }: { projects: ProjectData[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// ProjectCard
+// ProjectRow — compact list view
 // ---------------------------------------------------------------------------
 
-function ProjectCard({ project }: { project: ProjectData }) {
+function ProjectRow({ project }: { project: ProjectData }) {
   const color = projectColor(project.name)
 
   return (
     <Link
       href={`/projects/${project.id}`}
-      className="group block rounded-xl bg-[#1a1918] border border-[#2a2827] overflow-hidden hover:bg-[#2a2827] transition-colors"
+      className="group flex items-center gap-3 rounded-lg bg-[#1a1918] border border-[#2a2827] px-4 py-3 hover:bg-[#2a2827] transition-colors"
     >
-      {/* Color accent bar */}
-      <div className="h-1" style={{ backgroundColor: color }} />
+      {/* Color dot */}
+      <div
+        className="h-2.5 w-2.5 rounded-full shrink-0"
+        style={{ backgroundColor: color }}
+      />
 
-      <div className="p-5">
-        <div className="flex items-start gap-3">
-          <div
-            className="h-4 w-4 rounded shrink-0 mt-0.5"
-            style={{ backgroundColor: color }}
-          />
-          <div className="flex-1 min-w-0">
-            <h3 className="text-base font-semibold text-white truncate group-hover:text-[#C07A4A] transition-colors">
-              {project.name}
-            </h3>
-            {project.shortCode && (
-              <span className="text-xs font-mono" style={{ color }}>
-                {project.shortCode}
-              </span>
-            )}
-          </div>
-        </div>
+      {/* Code */}
+      <span className="text-xs font-mono w-10 shrink-0 text-stone-500">
+        {project.shortCode || '—'}
+      </span>
 
-        {project.byggherre && (
-          <div className="flex items-center gap-1.5 mt-2">
-            <Building2 className="h-3 w-3 text-stone-500" />
-            <span className="text-xs text-stone-400 truncate">
-              {project.byggherre}
-            </span>
-          </div>
-        )}
+      {/* Name */}
+      <span className="text-sm font-medium text-white truncate flex-1 group-hover:text-[#C07A4A] transition-colors">
+        {project.name}
+      </span>
 
-        {project.description && (
-          <p className="text-xs text-stone-500 mt-2 line-clamp-2">
-            {project.description}
-          </p>
-        )}
+      {/* Byggherre */}
+      <span className="text-xs text-stone-500 truncate max-w-[200px] hidden sm:block">
+        {project.byggherre || ''}
+      </span>
 
-        <div className="flex items-center gap-4 mt-4 pt-3 border-t border-[#2a2827]">
-          <div className="flex items-center gap-1.5 text-xs text-stone-400">
-            <CheckSquare className="h-3.5 w-3.5" />
-            <span>
-              {project._count.tasks} åpne oppgave
-              {project._count.tasks !== 1 ? 'r' : ''}
-            </span>
-          </div>
-        </div>
-      </div>
+      {/* Task count */}
+      <span className="text-xs text-stone-500 shrink-0 flex items-center gap-1">
+        <CheckSquare className="h-3 w-3" />
+        {project._count.tasks}
+      </span>
     </Link>
   )
 }

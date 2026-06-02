@@ -34,9 +34,7 @@ export async function GET() {
     'email',
     'offline_access',
     'Mail.Read',
-    'Mail.ReadWrite',
     'Calendars.Read',
-    'Calendars.ReadWrite',
   ]
 
   const params = new URLSearchParams({
