@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
-import { runToolLoop } from "@/lib/ai/tool-loop";
+import { runToolLoop, runToolLoopStream } from "@/lib/ai/tool-loop";
 import { checkQuota } from "@/lib/ai/log";
 
 // ---------------------------------------------------------------------------
@@ -12,12 +12,11 @@ import { checkQuota } from "@/lib/ai/log";
 interface ChatRequestBody {
   threadId?: string;
   message: string;
+  stream?: boolean;
 }
 
 export async function POST(request: NextRequest) {
-  // -------------------------------------------------------------------------
   // 1. Authenticate
-  // -------------------------------------------------------------------------
   const supabase = await createClient();
   const {
     data: { user },
@@ -30,9 +29,7 @@ export async function POST(request: NextRequest) {
 
   const userId = user.id;
 
-  // -------------------------------------------------------------------------
   // 1b. Check AI quota
-  // -------------------------------------------------------------------------
   const quota = await checkQuota(userId);
   if (!quota.ok) {
     return NextResponse.json(
@@ -40,13 +37,11 @@ export async function POST(request: NextRequest) {
         error: "Kvote oppbrukt",
         response: `Du har brukt opp AI-kvoten din denne måneden (${quota.limit} kr). Gå til Innstillinger for å kjøpe mer kreditt.`,
       },
-      { status: 200 } // Return 200 so the chat UI can display the message
+      { status: 200 }
     );
   }
 
-  // -------------------------------------------------------------------------
   // 2. Parse request
-  // -------------------------------------------------------------------------
   let body: ChatRequestBody;
   try {
     body = await request.json();
@@ -68,11 +63,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // -----------------------------------------------------------------------
-    // 3. Thread management — create or validate
-    // -----------------------------------------------------------------------
+    // 3. Thread management
     if (threadId) {
-      // Verify the thread belongs to this user
       const existing = await prisma.chatThread.findFirst({
         where: { id: threadId, userId },
       });
@@ -83,33 +75,23 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // Create a new thread
       const thread = await prisma.chatThread.create({
-        data: {
-          userId,
-          title: message.slice(0, 100),
-        },
+        data: { userId, title: message.slice(0, 100) },
       });
       threadId = thread.id;
     }
 
-    // -----------------------------------------------------------------------
     // 4. Save user message
-    // -----------------------------------------------------------------------
     await prisma.chatMessage.create({
       data: {
         threadId,
         userId,
         role: "user",
-        parts: JSON.parse(
-          JSON.stringify([{ type: "text", text: message }])
-        ),
+        parts: JSON.parse(JSON.stringify([{ type: "text", text: message }])),
       },
     });
 
-    // -----------------------------------------------------------------------
     // 5. Load conversation history (limit 40 messages)
-    // -----------------------------------------------------------------------
     const history = await prisma.chatMessage.findMany({
       where: { threadId },
       orderBy: { createdAt: "asc" },
@@ -117,46 +99,143 @@ export async function POST(request: NextRequest) {
       select: { role: true, parts: true },
     });
 
-    // Convert DB messages to Anthropic message format
-    const anthropicMessages: Anthropic.MessageParam[] = history
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => {
-        const parts = m.parts as Array<{ type: string; text?: string }>;
-        // Simple text extraction for history — tool results are already
-        // resolved, so we just send the text content
-        const text = parts
-          .filter((p) => p.type === "text" && p.text)
-          .map((p) => p.text!)
-          .join("\n");
+    // Convert DB messages to Anthropic format.
+    // Keep full tool_use/tool_result structure for the last N messages.
+    const KEEP_FULL_LAST = 10;
+    const filtered = history.filter(
+      (m) => m.role === "user" || m.role === "assistant"
+    );
+    const collapseCount = Math.max(0, filtered.length - KEEP_FULL_LAST);
 
-        return {
-          role: m.role as "user" | "assistant",
-          content: text || "(tom melding)",
-        };
+    const anthropicMessages: Anthropic.MessageParam[] = [];
+
+    for (let i = 0; i < filtered.length; i++) {
+      const m = filtered[i];
+      const parts = m.parts as Array<Record<string, unknown>>;
+
+      if (i >= collapseCount && m.role === "assistant") {
+        const stored = parts.find(
+          (p) => p.type === "anthropic_conversation"
+        );
+        if (stored && Array.isArray(stored.messages)) {
+          for (const msg of stored.messages as Array<{
+            role: string;
+            content: unknown;
+          }>) {
+            anthropicMessages.push({
+              role: msg.role as "user" | "assistant",
+              content: msg.content as Anthropic.ContentBlockParam[],
+            });
+          }
+          continue;
+        }
+      }
+
+      const text = parts
+        .filter(
+          (p) => p.type === "text" && typeof p.text === "string" && p.text
+        )
+        .map((p) => p.text as string)
+        .join("\n");
+
+      anthropicMessages.push({
+        role: m.role as "user" | "assistant",
+        content: text || "(tom melding)",
+      });
+    }
+
+    // 6. Run the tool loop (streaming or non-streaming)
+    if (body.stream) {
+      const rawStream = runToolLoopStream({
+        userId,
+        messages: anthropicMessages,
+        threadId,
       });
 
-    // -----------------------------------------------------------------------
-    // 6. Run the tool loop
-    // -----------------------------------------------------------------------
+      const persist = new TransformStream<Uint8Array, Uint8Array>({
+        async transform(chunk, ctrl) {
+          ctrl.enqueue(chunk);
+          const chunkText = new TextDecoder().decode(chunk);
+          if (chunkText.includes("event: done")) {
+            try {
+              const dataLine = chunkText
+                .split("\n")
+                .find((l) => l.startsWith("data: "));
+              if (dataLine) {
+                const doneData = JSON.parse(dataLine.slice(6));
+                const msgParts: Array<Record<string, unknown>> = [
+                  { type: "text", text: doneData.response },
+                ];
+                if (doneData.toolCalls?.length > 0) {
+                  msgParts.push({
+                    type: "tool_calls",
+                    calls: doneData.toolCalls,
+                  });
+                }
+                if (doneData.conversationBlocks?.length > 0) {
+                  msgParts.push({
+                    type: "anthropic_conversation",
+                    messages: doneData.conversationBlocks,
+                  });
+                }
+                await prisma.chatMessage.create({
+                  data: {
+                    threadId: threadId!,
+                    userId,
+                    role: "assistant",
+                    parts: JSON.parse(JSON.stringify(msgParts)),
+                  },
+                });
+                if (!body.threadId) {
+                  await prisma.chatThread.update({
+                    where: { id: threadId! },
+                    data: { title: message.slice(0, 80) },
+                  });
+                }
+              }
+            } catch (e) {
+              console.error("[POST /api/chat] Error persisting stream:", e);
+            }
+          }
+        },
+      });
+
+      return new Response(rawStream.pipeThrough(persist), {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
+
+    // Non-streaming path
     const result = await runToolLoop({
       userId,
       messages: anthropicMessages,
     });
 
-    // -----------------------------------------------------------------------
     // 7. Save assistant response
-    // -----------------------------------------------------------------------
     const assistantParts: Array<Record<string, unknown>> = [
       { type: "text", text: result.response },
     ];
 
-    // Include tool call references for UI rendering
     if (result.toolCalls.length > 0) {
       assistantParts.push({
         type: "tool_calls",
         calls: result.toolCalls.map((tc) => ({
           name: tc.name,
           input: tc.input,
+        })),
+      });
+    }
+
+    if (result.conversationBlocks.length > 0) {
+      assistantParts.push({
+        type: "anthropic_conversation",
+        messages: result.conversationBlocks.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
         })),
       });
     }
@@ -170,21 +249,15 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // -----------------------------------------------------------------------
-    // 8. Update thread title if it was auto-generated
-    // -----------------------------------------------------------------------
+    // 8. Update thread title if first message
     if (!body.threadId) {
-      // First message — update title based on the conversation
-      const titleCandidate = message.slice(0, 80);
       await prisma.chatThread.update({
         where: { id: threadId },
-        data: { title: titleCandidate },
+        data: { title: message.slice(0, 80) },
       });
     }
 
-    // -----------------------------------------------------------------------
     // 9. Return response
-    // -----------------------------------------------------------------------
     return NextResponse.json({
       threadId,
       response: result.response,
@@ -196,8 +269,8 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error("[POST /api/chat] Error:", err);
-    const message =
+    const errMessage =
       err instanceof Error ? err.message : "Intern serverfeil";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: errMessage }, { status: 500 });
   }
 }

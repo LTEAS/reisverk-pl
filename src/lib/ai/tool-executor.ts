@@ -428,42 +428,49 @@ async function generateReplySuggestion(
     include: {
       project: { select: { name: true } },
     },
-  });
+    // Ensure we get the email body for AI generation
+  }) as any;
 
   if (!email) {
     return JSON.stringify({ error: `E-post ${emailId} ikke funnet.` });
   }
 
-  // Build a template-based reply (will be replaced with AI generation later)
-  const toneGreeting =
-    tone === "friendly"
-      ? "Hei"
-      : tone === "brief"
-        ? "Hei"
-        : "Kjære";
+  // Generate AI-powered reply using Haiku for speed and cost efficiency
+  const { createMessageWithRetry } = await import("./anthropic");
 
-  const senderFirstName = email.senderName?.split(" ")[0] ?? "avsender";
-  const projectRef = email.project ? ` (${email.project.name})` : "";
+  const emailBody = (email as any).bodyText || (email as any).bodyPreview || "";
+  const senderName = email.senderName || email.senderEmail || "avsender";
+  const projectRef = email.project ? ` (prosjekt: ${email.project.name})` : "";
 
-  let draftBody = `${toneGreeting} ${senderFirstName},\n\n`;
-  draftBody += `Takk for din e-post`;
-  if (email.subject) {
-    draftBody += ` vedrørende "${email.subject}"`;
-  }
-  draftBody += `${projectRef}.\n\n`;
+  const aiPrompt = `Du er en norsk prosjektleder i byggebransjen. Skriv et e-postsvar på norsk (bokmål).
 
-  if (instructions) {
-    draftBody += `${instructions}\n\n`;
-  } else {
-    draftBody += `Jeg har mottatt din henvendelse og vil komme tilbake til deg så snart som mulig.\n\n`;
-  }
+E-post du svarer på:
+- Fra: ${senderName}
+- Emne: ${email.subject || "(uten emne)"}
+- Prosjekt: ${email.project?.name || "ukjent"}
+- Innhold: ${emailBody.slice(0, 1500)}
 
-  if (tone === "formal") {
-    draftBody += `Med vennlig hilsen`;
-  } else if (tone === "friendly") {
-    draftBody += `Hilsen`;
-  } else {
-    draftBody += `Mvh`;
+Tone: ${tone === "friendly" ? "vennlig og uformell" : tone === "brief" ? "kort og konsis" : "profesjonell og formell"}
+${instructions ? `Spesielle instruksjoner: ${instructions}` : ""}
+
+Skriv KUN selve svarteksten. Ikke inkluder emne, hilsen-linje på slutten eller signatur — bare brødteksten. Svar på det som faktisk ble spurt om eller meddelt.`;
+
+  let draftBody: string;
+  try {
+    const aiResponse = await createMessageWithRetry({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: aiPrompt }],
+    });
+    draftBody =
+      aiResponse.content[0].type === "text"
+        ? aiResponse.content[0].text
+        : "Kunne ikke generere svar.";
+  } catch {
+    // Fallback to simple template if AI fails
+    const greeting = tone === "formal" ? "Kjære" : "Hei";
+    const firstName = senderName.split(" ")[0];
+    draftBody = `${greeting} ${firstName},\n\nTakk for din e-post${email.subject ? ` vedrørende "${email.subject}"` : ""}${projectRef}.\n\n${instructions || "Jeg har mottatt din henvendelse og vil komme tilbake til deg så snart som mulig."}\n\n${tone === "formal" ? "Med vennlig hilsen" : "Mvh"}`;
   }
 
   const draftSubject = email.subject?.startsWith("Re:")
@@ -478,7 +485,7 @@ async function generateReplySuggestion(
       draftSubject,
       draftBody,
       tone,
-      confidence: 0.7,
+      confidence: 0.85,
       status: "suggested",
     },
   });

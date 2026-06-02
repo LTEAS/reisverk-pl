@@ -117,38 +117,103 @@ export function ChatView({ threads: initialThreads }: { threads: Thread[] }) {
         body: JSON.stringify({
           threadId: selectedThreadId || undefined,
           message: messageText,
+          stream: true,
         }),
       })
 
-      if (res.ok) {
-        const data = await res.json()
-        const assistantMessage: Message = {
-          role: 'assistant',
-          text: data.response,
-          toolCalls: data.toolCalls,
-        }
-        setMessages((prev) => [...prev, assistantMessage])
-
-        if (!selectedThreadId && data.threadId) {
-          setSelectedThreadId(data.threadId)
-          setThreads((prev) => [
-            {
-              id: data.threadId,
-              title: messageText.slice(0, 80),
-              updatedAt: new Date(),
-              _count: { messages: 2 },
-            },
-            ...prev,
-          ])
-        }
-      } else {
+      if (!res.ok) {
         setMessages((prev) => [
           ...prev,
-          {
-            role: 'assistant',
-            text: 'Beklager, noe gikk galt. Proev igjen.',
-          },
+          { role: 'assistant', text: 'Beklager, noe gikk galt. Prøv igjen.' },
         ])
+        return
+      }
+
+      // Add empty assistant message that we'll fill progressively
+      const assistantIdx = messages.length + 1 // +1 for the user message we just added
+      setMessages((prev) => [...prev, { role: 'assistant', text: '', toolCalls: [] }])
+
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No reader')
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullText = ''
+      let toolCalls: { name: string }[] = []
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // Keep incomplete line in buffer
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          if (line.startsWith('event: ')) {
+            const event = line.slice(7).trim()
+            const dataLine = lines[i + 1]
+            if (!dataLine?.startsWith('data: ')) continue
+            const data = JSON.parse(dataLine.slice(6))
+            i++ // Skip the data line
+
+            if (event === 'text_delta') {
+              fullText += data.delta
+              const captured = fullText
+              setMessages((prev) => {
+                const updated = [...prev]
+                updated[assistantIdx] = {
+                  ...updated[assistantIdx],
+                  text: captured,
+                }
+                return updated
+              })
+            } else if (event === 'tool_call') {
+              toolCalls = [...toolCalls, { name: data.name }]
+              const captured = toolCalls
+              setMessages((prev) => {
+                const updated = [...prev]
+                updated[assistantIdx] = {
+                  ...updated[assistantIdx],
+                  toolCalls: captured,
+                }
+                return updated
+              })
+            } else if (event === 'done') {
+              // Final update with complete data
+              setMessages((prev) => {
+                const updated = [...prev]
+                updated[assistantIdx] = {
+                  role: 'assistant',
+                  text: data.response,
+                  toolCalls: data.toolCalls || [],
+                }
+                return updated
+              })
+              if (!selectedThreadId && data.threadId) {
+                setSelectedThreadId(data.threadId)
+                setThreads((prev) => [
+                  {
+                    id: data.threadId,
+                    title: messageText.slice(0, 80),
+                    updatedAt: new Date(),
+                    _count: { messages: 2 },
+                  },
+                  ...prev,
+                ])
+              }
+            } else if (event === 'error') {
+              setMessages((prev) => {
+                const updated = [...prev]
+                updated[assistantIdx] = {
+                  role: 'assistant',
+                  text: `Feil: ${data.message}`,
+                }
+                return updated
+              })
+            }
+          }
+        }
       }
     } catch (err) {
       setMessages((prev) => [

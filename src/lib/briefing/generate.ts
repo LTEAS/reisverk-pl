@@ -599,6 +599,53 @@ VIKTIG: Ikke hopp over detaljer. Beløp, datoer, adresser, dokumentnavn, kontakt
 const BRIEFING_MODEL = 'claude-sonnet-4-6'
 const BRIEFING_MONTHLY_LIMIT = 30
 
+/**
+ * Run a first-pass analysis of emails before the main briefing generation.
+ * This extracts structured data (events, people, actions, risks) per project,
+ * which the main prompt can reference for a more accurate briefing.
+ */
+async function runAnalysisPass(
+  state: Awaited<ReturnType<typeof fetchCurrentState>>,
+  userId: string
+): Promise<string | null> {
+  // Only run analysis if there are enough emails to benefit from it
+  if (state.recentEmails.length < 5) return null
+
+  const analysisPrompt = buildAnalysisPrompt(state)
+  const analysisStart = Date.now()
+
+  try {
+    const analysisResponse = await createMessageWithRetry({
+      model: BRIEFING_MODEL,
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: analysisPrompt }],
+    })
+
+    const analysisText =
+      analysisResponse.content[0].type === 'text'
+        ? analysisResponse.content[0].text
+        : null
+
+    await logAiCall({
+      userId,
+      purpose: 'briefing_analysis',
+      model: BRIEFING_MODEL,
+      promptTokens: analysisResponse.usage.input_tokens,
+      completionTokens: analysisResponse.usage.output_tokens,
+      totalTokens:
+        analysisResponse.usage.input_tokens +
+        analysisResponse.usage.output_tokens,
+      durationMs: Date.now() - analysisStart,
+      status: 'success',
+    })
+
+    return analysisText
+  } catch (err) {
+    console.warn('Briefing analysis pass failed, continuing without:', err)
+    return null
+  }
+}
+
 export async function generateBriefing(userId: string): Promise<BriefingResult> {
   const state = await fetchCurrentState(userId)
   const { now, today, todayMeetings, overdueTasks, unansweredEmails, recentEmails, projects } = state
@@ -610,7 +657,7 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
   const briefingCallsThisMonth = await prisma.aiCallLog.count({
     where: {
       userId,
-      purpose: { in: ['daily_briefing', 'briefing_update'] },
+      purpose: { in: ['daily_briefing', 'briefing_update', 'briefing_analysis'] },
       createdAt: { gte: monthStart, lt: monthEnd },
     },
   })
@@ -628,9 +675,22 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
 
   const isUpdate = !!(existingBriefing?.summary && existingBriefing?.generatedAt)
 
-  const prompt = isUpdate
-    ? buildUpdatePrompt(existingBriefing!.summary!, existingBriefing!.generatedAt!, state)
-    : buildInitialPrompt(state)
+  let prompt: string
+  if (isUpdate) {
+    prompt = buildUpdatePrompt(existingBriefing!.summary!, existingBriefing!.generatedAt!, state)
+  } else {
+    // For initial briefings, run a two-pass approach:
+    // Pass 1: Detailed email analysis extracts structured data
+    // Pass 2: Main briefing uses analysis as additional context
+    const analysis = await runAnalysisPass(state, userId)
+    const basePrompt = buildInitialPrompt(state)
+
+    if (analysis) {
+      prompt = basePrompt + `\n\n===== FORHÅNDSANALYSE AV E-POSTER =====\nFølgende detaljerte analyse er allerede gjort av e-postene. Bruk denne som grunnlag — ikke gjenta analysen, men bygg en sammenhengende briefing basert på funnene:\n${analysis}\n===== SLUTT FORHÅNDSANALYSE =====`
+    } else {
+      prompt = basePrompt
+    }
+  }
 
   const response = await createMessageWithRetry(
     { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] },
