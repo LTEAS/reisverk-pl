@@ -21,6 +21,7 @@ import {
   Users,
 } from 'lucide-react'
 import { updateTaskStatus } from '@/lib/actions/tasks'
+import { changeEmailProject } from '@/lib/actions/emails'
 import {
   updateProject,
   addContact,
@@ -127,6 +128,7 @@ interface ProjectDetailProps {
     role: ProjectRole
     user: { id: string; displayName: string | null; email: string | null }
   }>
+  allProjects: Array<{ id: string; name: string; shortCode: string | null }>
   userRole: ProjectRole
 }
 
@@ -142,6 +144,7 @@ export function ProjectDetail({
   contacts,
   emailMonitors,
   members,
+  allProjects,
   userRole,
 }: ProjectDetailProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('tasks')
@@ -209,7 +212,7 @@ export function ProjectDetail({
 
       {/* Tab content */}
       {activeTab === 'tasks' && <TasksTab tasks={tasks} />}
-      {activeTab === 'emails' && <EmailsTab emails={emails} />}
+      {activeTab === 'emails' && <EmailsTab emails={emails} currentProjectId={project.id} allProjects={allProjects} />}
       {activeTab === 'suggestions' && (
         <SuggestionsTab suggestions={suggestions} projectId={project.id} />
       )}
@@ -289,15 +292,37 @@ function TasksTab({ tasks }: { tasks: ProjectDetailProps['tasks'] }) {
 // EmailsTab
 // ---------------------------------------------------------------------------
 
-function EmailsTab({ emails }: { emails: ProjectDetailProps['emails'] }) {
+function EmailsTab({
+  emails,
+  currentProjectId,
+  allProjects,
+}: {
+  emails: ProjectDetailProps['emails']
+  currentProjectId: string
+  allProjects: ProjectDetailProps['allProjects']
+}) {
+  const [movingId, setMovingId] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+
+  function handleMove(emailId: string, newProjectId: string) {
+    startTransition(async () => {
+      await changeEmailProject(emailId, newProjectId)
+      setMovingId(null)
+      router.refresh()
+    })
+  }
+
   if (emails.length === 0) {
     return <EmptyState icon={Mail} title="Ingen e-poster" description="Ingen e-poster er klassifisert til dette prosjektet ennå." />
   }
 
+  const otherProjects = allProjects.filter((p) => p.id !== currentProjectId)
+
   return (
     <div className="rounded-xl bg-[#1a1918] border border-[#2a2827] divide-y divide-[#2a2827]">
       {emails.map((email) => (
-        <div key={email.id} className="px-5 py-3 hover:bg-[#2a2827] transition-colors">
+        <div key={email.id} className="px-5 py-3 hover:bg-[#2a2827] transition-colors group">
           <div className="flex items-center gap-3">
             <div className={`shrink-0 w-1.5 h-1.5 rounded-full ${
               email.replyStatus === 'needs_reply' ? 'bg-amber-400' :
@@ -320,6 +345,34 @@ function EmailsTab({ emails }: { emails: ProjectDetailProps['emails'] }) {
               }`}>
                 {email.direction === 'inbound' ? 'Inn' : 'Ut'}
               </span>
+            )}
+            {/* Move to project button */}
+            {movingId === email.id ? (
+              <select
+                autoFocus
+                className="text-[10px] bg-[#2a2827] border border-[#3a3837] rounded px-1.5 py-1 text-stone-300 focus:outline-none"
+                onChange={(e) => {
+                  if (e.target.value) handleMove(email.id, e.target.value)
+                  else setMovingId(null)
+                }}
+                onBlur={() => setMovingId(null)}
+                disabled={isPending}
+              >
+                <option value="">Velg prosjekt...</option>
+                {otherProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.shortCode ? `[${p.shortCode}] ` : ''}{p.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button
+                onClick={() => setMovingId(email.id)}
+                className="opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded text-stone-500 hover:text-stone-300 hover:bg-[#3a3837] transition-all"
+                title="Flytt til annet prosjekt"
+              >
+                Flytt
+              </button>
             )}
           </div>
           {email.aiSummary && (

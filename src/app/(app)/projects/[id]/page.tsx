@@ -20,7 +20,7 @@ export default async function ProjectDetailPage({
   if (!membership) notFound()
 
   // Parallel data fetching
-  const [project, tasks, emails, suggestions, contacts, emailMonitors, members] =
+  const [project, tasks, emails, suggestions, contacts, emailMonitors, members, allProjects] =
     await Promise.all([
       prisma.project.findUnique({
         where: { id },
@@ -72,6 +72,13 @@ export default async function ProjectDetailPage({
           user: { select: { id: true, displayName: true, email: true } },
         },
       }),
+
+      // All projects for "move email" dropdown
+      prisma.project.findMany({
+        where: { members: { some: { userId } } },
+        select: { id: true, name: true, shortCode: true },
+        orderBy: { name: 'asc' },
+      }),
     ])
 
   if (!project) notFound()
@@ -86,6 +93,7 @@ export default async function ProjectDetailPage({
         contacts={contacts}
         emailMonitors={emailMonitors}
         members={members}
+        allProjects={allProjects}
         userRole={membership.role}
       />
     </div>
