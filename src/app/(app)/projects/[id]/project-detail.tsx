@@ -20,7 +20,7 @@ import {
   AtSign,
   Users,
 } from 'lucide-react'
-import { updateTaskStatus } from '@/lib/actions/tasks'
+import { updateTaskStatus, proposeTaskDueDates, setTaskDueDate } from '@/lib/actions/tasks'
 import { changeEmailProject } from '@/lib/actions/emails'
 import {
   updateProject,
@@ -211,7 +211,7 @@ export function ProjectDetail({
       </div>
 
       {/* Tab content */}
-      {activeTab === 'tasks' && <TasksTab tasks={tasks} />}
+      {activeTab === 'tasks' && <TasksTab tasks={tasks} projectId={project.id} />}
       {activeTab === 'emails' && <EmailsTab emails={emails} currentProjectId={project.id} allProjects={allProjects} />}
       {activeTab === 'suggestions' && (
         <SuggestionsTab suggestions={suggestions} projectId={project.id} />
@@ -233,13 +233,75 @@ export function ProjectDetail({
 // TasksTab
 // ---------------------------------------------------------------------------
 
-function TasksTab({ tasks }: { tasks: ProjectDetailProps['tasks'] }) {
-  const [isPending, startTransition] = useTransition()
+type DueDateProposal = {
+  taskId: string
+  taskNumber: number
+  title: string
+  suggestedDueDate: string
+  reason: string
+  confidence: number
+}
+
+function TasksTab({
+  tasks,
+  projectId,
+}: {
+  tasks: ProjectDetailProps['tasks']
+  projectId: string
+}) {
+  const router = useRouter()
+  const [, startTransition] = useTransition()
+
+  const [loadingProposals, setLoadingProposals] = useState(false)
+  const [proposals, setProposals] = useState<DueDateProposal[] | null>(null)
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
+  const [dates, setDates] = useState<Record<string, string>>({})
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   function handleStatusChange(taskId: string, newStatus: TaskStatus) {
     startTransition(async () => {
       await updateTaskStatus(taskId, newStatus)
     })
+  }
+
+  async function handlePropose() {
+    setLoadingProposals(true)
+    setError(null)
+    try {
+      const result = await proposeTaskDueDates(projectId)
+      setProposals(result)
+      const sel: Record<string, boolean> = {}
+      const dt: Record<string, string> = {}
+      for (const p of result) {
+        sel[p.taskId] = true
+        dt[p.taskId] = p.suggestedDueDate
+      }
+      setSelected(sel)
+      setDates(dt)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kunne ikke hente forslag')
+    } finally {
+      setLoadingProposals(false)
+    }
+  }
+
+  async function handleApply() {
+    if (!proposals) return
+    setApplying(true)
+    setError(null)
+    try {
+      const chosen = proposals.filter((p) => selected[p.taskId] && dates[p.taskId])
+      for (const p of chosen) {
+        await setTaskDueDate(p.taskId, dates[p.taskId])
+      }
+      setProposals(null)
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Kunne ikke lagre frister')
+    } finally {
+      setApplying(false)
+    }
   }
 
   if (tasks.length === 0) {
@@ -249,41 +311,114 @@ function TasksTab({ tasks }: { tasks: ProjectDetailProps['tasks'] }) {
   }
 
   return (
-    <div className="rounded-xl bg-[#1a1918] border border-[#2a2827] divide-y divide-[#2a2827]">
-      {tasks.map((task) => {
-        const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !['utfort', 'lukket'].includes(task.status)
-        return (
-          <div key={task.id} className="flex items-center gap-3 px-5 py-3 hover:bg-[#2a2827] transition-colors">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-stone-200 truncate">
-                <span className="text-stone-600 mr-1.5">#{task.taskNumber}</span>
-                {task.title}
-              </p>
-              {task.description && (
-                <p className="text-xs text-stone-500 truncate mt-0.5">{task.description}</p>
-              )}
-            </div>
-            {(task.assigneeUser || task.assignee) && (
-              <span className="text-xs text-stone-500 hidden sm:block">{task.assigneeUser?.displayName || task.assignee}</span>
-            )}
-            {task.dueDate && (
-              <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-red-400' : 'text-stone-500'}`}>
-                <Clock className="h-3 w-3" />
-                {new Date(task.dueDate).toLocaleDateString('nb-NO', { day: 'numeric', month: 'short' })}
-              </span>
-            )}
-            <select
-              value={task.status}
-              onChange={(e) => handleStatusChange(task.id, e.target.value as TaskStatus)}
-              className={`text-[10px] px-2 py-0.5 rounded-full font-medium border appearance-none cursor-pointer focus:outline-none ${statusColors[task.status]}`}
-            >
-              {Object.entries(statusLabels).map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handlePropose}
+          disabled={loadingProposals}
+          className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-purple-500/10 text-purple-300 border border-purple-500/20 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {loadingProposals ? 'Analyserer…' : 'Foreslå frister (AI)'}
+        </button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+
+      {proposals && (
+        <div className="rounded-xl bg-[#1a1918] border border-purple-500/20 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium text-purple-200 flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4" /> Forslag til frister
+            </h4>
+            <button onClick={() => setProposals(null)} className="text-stone-500 hover:text-stone-300">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-        )
-      })}
+
+          {proposals.length === 0 ? (
+            <p className="text-xs text-stone-500">
+              AI-en fant ikke konkret grunnlag for frister på de gjenstående oppgavene.
+            </p>
+          ) : (
+            <>
+              <div className="divide-y divide-[#2a2827]">
+                {proposals.map((p) => (
+                  <div key={p.taskId} className="flex items-start gap-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={!!selected[p.taskId]}
+                      onChange={(e) => setSelected((s) => ({ ...s, [p.taskId]: e.target.checked }))}
+                      className="mt-1 accent-purple-500"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-stone-200 truncate">
+                        <span className="text-stone-600 mr-1.5">#{p.taskNumber}</span>
+                        {p.title}
+                      </p>
+                      <p className="text-xs text-stone-500 mt-0.5">{p.reason}</p>
+                    </div>
+                    <input
+                      type="date"
+                      value={dates[p.taskId] || ''}
+                      onChange={(e) => setDates((d) => ({ ...d, [p.taskId]: e.target.value }))}
+                      className="text-xs rounded-lg bg-[#0f0e0d] border border-[#2a2827] px-2 py-1 text-stone-200 focus:outline-none focus:border-purple-500/50"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setProposals(null)} className="text-xs px-3 py-1.5 rounded-lg text-stone-400 hover:text-stone-200">
+                  Avbryt
+                </button>
+                <button
+                  onClick={handleApply}
+                  disabled={applying}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-200 border border-purple-500/30 hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+                >
+                  {applying ? 'Lagrer…' : 'Lagre valgte'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="rounded-xl bg-[#1a1918] border border-[#2a2827] divide-y divide-[#2a2827]">
+        {tasks.map((task) => {
+          const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !['utfort', 'lukket'].includes(task.status)
+          return (
+            <div key={task.id} className="flex items-center gap-3 px-5 py-3 hover:bg-[#2a2827] transition-colors">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-stone-200 truncate">
+                  <span className="text-stone-600 mr-1.5">#{task.taskNumber}</span>
+                  {task.title}
+                </p>
+                {task.description && (
+                  <p className="text-xs text-stone-500 truncate mt-0.5">{task.description}</p>
+                )}
+              </div>
+              {(task.assigneeUser || task.assignee) && (
+                <span className="text-xs text-stone-500 hidden sm:block">{task.assigneeUser?.displayName || task.assignee}</span>
+              )}
+              {task.dueDate && (
+                <span className={`text-xs flex items-center gap-1 ${isOverdue ? 'text-red-400' : 'text-stone-500'}`}>
+                  <Clock className="h-3 w-3" />
+                  {new Date(task.dueDate).toLocaleDateString('nb-NO', { day: 'numeric', month: 'short' })}
+                </span>
+              )}
+              <select
+                value={task.status}
+                onChange={(e) => handleStatusChange(task.id, e.target.value as TaskStatus)}
+                className={`text-[10px] px-2 py-0.5 rounded-full font-medium border appearance-none cursor-pointer focus:outline-none ${statusColors[task.status]}`}
+              >
+                {Object.entries(statusLabels).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

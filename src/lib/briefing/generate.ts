@@ -353,26 +353,9 @@ ${activeReminders.length > 0
     }).join('\n')
   : 'Ingen påminnelser i dag'}
 
-Svar med BARE JSON (ingen annen tekst):
-{
-  "summary": "Se format nedenfor",
-  "actionItems": [
-    { "key": "unik-nøkkel", "text": "Kort handlingspunkt med prosjektreferanse" }
-  ],
-  "taskSuggestions": [
-    {
-      "title": "Kort, handlingsbar oppgavetittel",
-      "projectCode": "Prosjektkode fra listen (f.eks. KEA, WA, S)",
-      "priority": "urgent|high|normal|low",
-      "dueDate": "YYYY-MM-DD eller null",
-      "description": "Kontekst: hvem, hva, hvorfor",
-      "sourceEmailSubject": "Emnet på e-posten som utløste dette"
-    }
-  ]
-}
+SVARFORMAT — VIKTIG: Svar i TO deler, i denne rekkefølgen.
 
-KRAV TIL summary-FELTET — bruk dette formatet:
-
+DEL 1 — BRIEFINGEN som REN MARKDOWN (ikke JSON, ikke kodeblokk).
 Start med BARE dato som overskrift, uten emojis eller ekstra titler:
 # ${now.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
 
@@ -400,11 +383,32 @@ Brukerens egne påminnelser for i dag (hvis noen finnes). Inkluder tidspunkt og 
 **Huskeliste — frister neste 2 dager**
 Konkrete frister med dato og hva som må gjøres.
 
+DEL 2 — STRUKTURERTE DATA.
+Skriv så en linje som inneholder BARE denne markøren:
+===BRIEFING_DATA===
+Deretter ETT JSON-objekt (og ingen annen tekst etter det) med kun handlingspunkter og oppgaveforslag:
+{
+  "actionItems": [
+    { "key": "unik-nøkkel", "text": "[KODE] Kort handlingspunkt med prosjektreferanse" }
+  ],
+  "taskSuggestions": [
+    {
+      "title": "Kort, handlingsbar oppgavetittel",
+      "projectCode": "Prosjektkode fra listen (f.eks. KEA, WA, S)",
+      "priority": "urgent|high|normal|low",
+      "dueDate": "YYYY-MM-DD eller null",
+      "description": "Kontekst: hvem, hva, hvorfor",
+      "sourceEmailSubject": "Emnet på e-posten som utløste dette"
+    }
+  ]
+}
+
 actionItems: 8-15 konkrete, prioriterte handlingspunkter med prosjektkode. Format: "[KODE] Handlingspunkt". Prioriter etter hastegrad. Eksempler: "[SANDER] Gjennomgå Haavind-dokumenter og kontraktsanmerkninger", "[KLEVEN] Følge opp sprinkler/sanitær med Thomas Storm".
 
 taskSuggestions: Oppgaver som bør opprettes i systemet. Opprett en for hvert konkret handlingspunkt som krever oppfølging. Bruk prosjektkoden fra BRUKERENS PROSJEKTER-listen. Ikke lag oppgaver for ting som allerede er i ÅPNE OPPGAVER-listen. Prioriter: "urgent" = haster denne uken, "high" = viktig neste uke, "normal" = bør gjøres, "low" = kan vente. Sett "dueDate" basert på frister nevnt i e-poster, ellers null.
 
 VIKTIG:
+- IKKE pakk briefingen inn i JSON eller kodeblokk — den skal være ren markdown FØR ===BRIEFING_DATA===.
 - Bruk NAVN på personer, ikke bare "avsender"
 - Inkluder spesifikke detaljer (beløp, datoer, stedsnavn, dokumentnavn)
 - Analyser sammenhenger mellom e-poster i samme prosjekt
@@ -492,9 +496,20 @@ OPPDATERT STATUS:
 OPPGAVER PER PROSJEKT (oppdatert):
 ${taskSections || 'Ingen åpne oppgaver'}
 
-Svar med BARE JSON (ingen annen tekst) i dette formatet:
+SVARFORMAT — Svar i TO deler, i denne rekkefølgen.
+
+DEL 1 — DEN OPPDATERTE BRIEFINGEN som REN MARKDOWN (ikke JSON, ikke kodeblokk).
+Behold den opprinnelige morgenbriefingen, men FJERN alle tidligere "Oppdatering kl."-seksjoner. Legg til ÉN ny seksjon nederst:
+---
+
+**Oppdatering kl. ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}**
+Organisert per prosjekt med nye e-poster, statusendringer og gjennomførte møter. Marker utførte ting med ✓. Kun ÉN oppdateringsseksjon totalt. Ta bare med oppdateringsseksjonen hvis det faktisk har skjedd noe nytt.
+
+DEL 2 — STRUKTURERTE DATA.
+Skriv så en linje som inneholder BARE denne markøren:
+===BRIEFING_DATA===
+Deretter ETT JSON-objekt (og ingen annen tekst etter det):
 {
-  "summary": "Oppdatert briefing-tekst. Behold den opprinnelige morgenbriefingen men FJERN alle tidligere 'Oppdatering kl.'-seksjoner. Legg til én ny '---\\n\\n**Oppdatering kl. ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}**' seksjon nederst, organisert per prosjekt med nye e-poster, statusendringer, gjennomførte møter. Marker utførte ting med ✓. Kun ÉN oppdateringsseksjon totalt.",
   "actionItems": [
     { "key": "unik-nøkkel", "text": "Kort handlingspunkt med prosjektreferanse" }
   ],
@@ -514,7 +529,7 @@ actionItems: 3-8 OPPDATERTE handlingspunkter basert på nåværende situasjon. I
 
 taskSuggestions: OPPDATERTE oppgaveforslag. Fjern oppgaver som allerede er opprettet/utført, legg til nye fra nye e-poster. Ikke dupliser oppgaver som allerede finnes i OPPGAVER PER PROSJEKT-listen.
 
-Vær konsis. Bare inkluder oppdateringsseksjonen i summary hvis det faktisk har skjedd noe nytt.`
+IKKE pakk briefingen inn i JSON eller kodeblokk — den skal være ren markdown FØR ===BRIEFING_DATA===. Vær konsis.`
 }
 
 // ---------------------------------------------------------------------------
@@ -693,15 +708,19 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
   }
 
   const response = await createMessageWithRetry(
-    { model: BRIEFING_MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] },
+    { model: BRIEFING_MODEL, max_tokens: 16000, messages: [{ role: 'user', content: prompt }] },
   )
 
   const rawText =
     response.content[0].type === 'text'
       ? response.content[0].text
-      : '{}'
+      : ''
 
-  // Parse structured JSON response
+  // The model returns the markdown briefing first, then a marker line, then a
+  // small JSON object with actionItems + taskSuggestions. Splitting on the
+  // marker keeps the summary intact even if the JSON is truncated or malformed.
+  const MARKER = '===BRIEFING_DATA==='
+
   let summary = 'Kunne ikke generere briefing'
   let actionItems: { key: string; text: string }[] = []
   let taskSuggestions: {
@@ -713,36 +732,54 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
     sourceEmailSubject: string | null
   }[] = []
 
-  try {
-    // Strip markdown code fences — handle various formats
-    let jsonStr = rawText.trim()
-    // Remove leading ```json or ``` and trailing ```
-    jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```\s*$/i, '').trim()
-    // If still wrapped in code fences (double-wrapped), strip again
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?\s*```\s*$/i, '').trim()
-    }
-    const parsed = JSON.parse(jsonStr)
-    summary = parsed.summary || summary
-    actionItems = Array.isArray(parsed.actionItems) ? parsed.actionItems : []
-    taskSuggestions = Array.isArray(parsed.taskSuggestions) ? parsed.taskSuggestions : []
-  } catch (parseErr) {
-    // Try to extract JSON from the response if it's embedded in other text
-    const jsonMatch = rawText.match(/\{[\s\S]*"summary"[\s\S]*\}/)
-    if (jsonMatch) {
+  const stripFences = (s: string) =>
+    s
+      .replace(/^```[a-z]*\s*\n?/i, '')
+      .replace(/\n?\s*```\s*$/i, '')
+      .trim()
+
+  const markerIdx = rawText.indexOf(MARKER)
+
+  if (markerIdx !== -1) {
+    // Preferred format: markdown summary + marker + small JSON block
+    const summaryPart = rawText.slice(0, markerIdx).trim()
+    if (summaryPart) summary = stripFences(summaryPart)
+
+    const dataPart = rawText.slice(markerIdx + MARKER.length).trim()
+    if (dataPart) {
       try {
-        const parsed = JSON.parse(jsonMatch[0])
-        summary = parsed.summary || summary
-        actionItems = Array.isArray(parsed.actionItems) ? parsed.actionItems : []
-        taskSuggestions = Array.isArray(parsed.taskSuggestions) ? parsed.taskSuggestions : []
-      } catch {
-        summary = rawText
-        console.warn('Briefing: could not parse JSON even with fallback extraction')
+        const parsed = JSON.parse(stripFences(dataPart))
+        if (Array.isArray(parsed.actionItems)) actionItems = parsed.actionItems
+        if (Array.isArray(parsed.taskSuggestions))
+          taskSuggestions = parsed.taskSuggestions
+      } catch (e) {
+        console.warn('Briefing: could not parse data block:', e)
       }
-    } else {
-      summary = rawText
-      console.warn('Briefing: no JSON found in response')
     }
+  } else if (/\{[\s\S]*"summary"\s*:/.test(rawText)) {
+    // Legacy/fallback: model returned a single JSON object. Salvage the summary
+    // even if the JSON is truncated, so we never dump raw JSON to the user.
+    try {
+      const parsed = JSON.parse(stripFences(rawText.trim()))
+      if (typeof parsed.summary === 'string') summary = parsed.summary
+      if (Array.isArray(parsed.actionItems)) actionItems = parsed.actionItems
+      if (Array.isArray(parsed.taskSuggestions))
+        taskSuggestions = parsed.taskSuggestions
+    } catch {
+      const m = rawText.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+      if (m) {
+        try {
+          summary = JSON.parse('"' + m[1] + '"')
+        } catch {
+          summary = m[1]
+        }
+      } else {
+        console.warn('Briefing: could not parse legacy JSON response')
+      }
+    }
+  } else {
+    // Plain markdown, no marker
+    summary = stripFences(rawText.trim()) || summary
   }
 
   // Sync action items to briefing_priorities table
