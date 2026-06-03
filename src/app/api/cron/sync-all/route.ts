@@ -9,6 +9,7 @@
  *   5. Calendar sync (fetch from Outlook calendar)
  *   6. Meeting prep (generate prep notes for upcoming meetings)
  *   7. Reply suggestions (draft replies for emails needing response)
+ *   8. Daily briefing (generate from the freshly synced + classified data)
  *
  * Triggered by Vercel Cron or external scheduler.
  * Protected by CRON_SECRET. Manual trigger: GET ?userId=<uuid>
@@ -23,8 +24,9 @@ import { autoCloseTasks } from '@/lib/ai/task-auto-close'
 import { syncCalendar } from '@/lib/microsoft/calendar-sync'
 import { generateMeetingPreps } from '@/lib/ai/meeting-prep'
 import { generateReplySuggestions } from '@/lib/ai/reply-suggestions'
+import { generateBriefing } from '@/lib/briefing/generate'
 
-export const maxDuration = 120
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 interface PipelineResult {
@@ -35,6 +37,7 @@ interface PipelineResult {
   calendarSync?: any
   meetingPrep?: any
   replySuggestions?: any
+  briefing?: any
   errors: string[]
   durationMs: number
 }
@@ -90,6 +93,15 @@ async function runPipeline(userId: string): Promise<PipelineResult> {
     result.replySuggestions = await generateReplySuggestions(userId)
   } catch (err: any) {
     result.errors.push(`replySuggestions: ${err.message}`)
+  }
+
+  // 8. Daily briefing — generated last, from freshly synced + classified data.
+  // generateBriefing reads from the DB (no extra sync) and enforces its own
+  // monthly limit; a throw here is caught so the rest of the pipeline still logs.
+  try {
+    result.briefing = await generateBriefing(userId)
+  } catch (err: any) {
+    result.errors.push(`briefing: ${err.message}`)
   }
 
   result.durationMs = Date.now() - start

@@ -672,7 +672,9 @@ export async function generateBriefing(userId: string): Promise<BriefingResult> 
   const briefingCallsThisMonth = await prisma.aiCallLog.count({
     where: {
       userId,
-      purpose: { in: ['daily_briefing', 'briefing_update', 'briefing_analysis'] },
+      // Count one entry per generation (the synthesis call). The analysis pass
+      // logs separately for cost, but must NOT count toward the monthly limit.
+      purpose: { in: ['daily_briefing', 'briefing_update'] },
       createdAt: { gte: monthStart, lt: monthEnd },
     },
   })

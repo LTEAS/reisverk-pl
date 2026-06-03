@@ -4,22 +4,27 @@ import { prisma } from "@/lib/prisma";
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-// Prices per 1M tokens (USD), converted to NOK at ~11 NOK/USD
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'claude-sonnet-4-20250514': { input: 0.033, output: 0.165 },  // $3/$15 per 1M → NOK
-  'claude-opus-4-20250514': { input: 0.165, output: 0.825 },    // $15/$75 per 1M → NOK
-  'claude-haiku-3-5-20241022': { input: 0.0088, output: 0.044 }, // $0.80/$4 per 1M → NOK
+// Prices per 1M tokens (USD). Matched by model family so version suffixes
+// (e.g. sonnet-4-6, haiku-4-5) resolve correctly. Converted to NOK below.
+const USD_TO_NOK = 11
+
+const MODEL_PRICING: Record<'sonnet' | 'haiku' | 'opus', { input: number; output: number }> = {
+  sonnet: { input: 3, output: 15 },  // Claude Sonnet 4 / 4.6 — $3 / $15 per 1M
+  haiku: { input: 1, output: 5 },    // Claude Haiku 4.5 — $1 / $5 per 1M
+  opus: { input: 5, output: 25 },    // Claude Opus 4.x — $5 / $25 per 1M
 }
 
 function estimateCostNok(model: string, promptTokens: number, completionTokens: number): number {
-  // Find pricing — match partial model name
-  const pricing = Object.entries(MODEL_PRICING).find(([key]) =>
-    model.includes(key) || key.includes(model)
-  )?.[1] || MODEL_PRICING['claude-sonnet-4-20250514'] // default to Sonnet
+  const m = model.toLowerCase()
+  const pricing = m.includes('opus')
+    ? MODEL_PRICING.opus
+    : m.includes('haiku')
+      ? MODEL_PRICING.haiku
+      : MODEL_PRICING.sonnet // default: all Sonnet variants
 
-  const inputCost = (promptTokens / 1_000_000) * pricing.input * 11
-  const outputCost = (completionTokens / 1_000_000) * pricing.output * 11
-  return Math.round((inputCost + outputCost) * 100) / 100
+  const inputCost = (promptTokens / 1_000_000) * pricing.input * USD_TO_NOK
+  const outputCost = (completionTokens / 1_000_000) * pricing.output * USD_TO_NOK
+  return Math.round((inputCost + outputCost) * 10000) / 10000
 }
 
 // ---------------------------------------------------------------------------

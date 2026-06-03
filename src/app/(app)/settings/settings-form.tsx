@@ -332,37 +332,10 @@ export function SettingsForm({
         <div className="space-y-4">
           <ToggleSetting
             label="Automatisk synkronisering"
-            description="Synkroniser e-post og kalender automatisk"
+            description="Kjører daglig synk + briefing automatisk hver morgen"
             checked={form.syncEnabled}
             onChange={(v) => updateField('syncEnabled', v)}
           />
-
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-stone-200">
-                Synkroniseringsintervall
-              </p>
-              <p className="text-xs text-stone-500">
-                Hvor ofte data synkroniseres (minutter)
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={5}
-                max={120}
-                step={5}
-                value={form.syncIntervalMin}
-                onChange={(e) =>
-                  updateField('syncIntervalMin', Number(e.target.value))
-                }
-                className="w-32 accent-[#C07A4A]"
-              />
-              <span className="text-sm text-stone-300 min-w-[50px] text-right">
-                {form.syncIntervalMin} min
-              </span>
-            </div>
-          </div>
         </div>
       </section>
 
