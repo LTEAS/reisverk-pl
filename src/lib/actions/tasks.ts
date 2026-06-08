@@ -104,6 +104,40 @@ export async function updateTaskStatus(taskId: string, newStatus: TaskStatus) {
 }
 
 // ---------------------------------------------------------------------------
+// moveTask — flytt en oppgave til et annet prosjekt
+// ---------------------------------------------------------------------------
+
+export async function moveTask(taskId: string, newProjectId: string) {
+  const user = await requireUser()
+  const userId = user.id
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { projectId: true },
+  })
+
+  if (!task) throw new Error('Oppgave ikke funnet')
+  if (task.projectId === newProjectId) return
+
+  // Verify membership in both source and destination project
+  await verifyProjectMembership(userId, task.projectId)
+  await verifyProjectMembership(userId, newProjectId)
+
+  // Assign a fresh task number in the destination project (numbers are
+  // project-scoped, so reusing the old one would collide/confuse)
+  const taskNumber = await getNextTaskNumber(newProjectId)
+
+  await prisma.task.update({
+    where: { id: taskId },
+    data: { projectId: newProjectId, taskNumber },
+  })
+
+  revalidatePath('/tasks')
+  revalidatePath(`/projects/${task.projectId}`)
+  revalidatePath(`/projects/${newProjectId}`)
+}
+
+// ---------------------------------------------------------------------------
 // snoozeTask
 // ---------------------------------------------------------------------------
 

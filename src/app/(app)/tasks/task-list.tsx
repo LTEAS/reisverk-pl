@@ -18,8 +18,10 @@ import {
   Send,
   Circle,
   CheckCircle2,
+  Loader2,
+  FolderInput,
 } from 'lucide-react'
-import { updateTaskStatus, snoozeTask, deleteTask, createTask } from '@/lib/actions/tasks'
+import { updateTaskStatus, snoozeTask, deleteTask, createTask, moveTask } from '@/lib/actions/tasks'
 import type { TaskStatus, PriorityLevel, TaskSource } from '@prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,10 @@ const allPriorities: PriorityLevel[] = ['urgent', 'high', 'normal', 'low']
 export function TaskList({ groupedTasks, projects, currentFilters }: TaskListProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  // Per-task pending + optimistic status, so a click gives instant feedback
+  // (checkbox flips immediately, row greys out + spinner while saving)
+  const [pendingTasks, setPendingTasks] = useState<Set<string>>(new Set())
+  const [optimisticStatus, setOptimisticStatus] = useState<Record<string, TaskStatus>>({})
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [showNewTask, setShowNewTask] = useState(false)
@@ -159,22 +165,65 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
     router.push(`/tasks?${params.toString()}`)
   }
 
+  function markPending(taskId: string, pending: boolean) {
+    setPendingTasks((prev) => {
+      const next = new Set(prev)
+      if (pending) next.add(taskId)
+      else next.delete(taskId)
+      return next
+    })
+  }
+
   function handleStatusChange(taskId: string, newStatus: TaskStatus) {
+    // Optimistic: reflect the new status instantly, mark task as saving
+    setOptimisticStatus((prev) => ({ ...prev, [taskId]: newStatus }))
+    markPending(taskId, true)
     startTransition(async () => {
-      await updateTaskStatus(taskId, newStatus)
+      try {
+        await updateTaskStatus(taskId, newStatus)
+      } finally {
+        markPending(taskId, false)
+        // Drop the override once the revalidated server data is in
+        setOptimisticStatus((prev) => {
+          const next = { ...prev }
+          delete next[taskId]
+          return next
+        })
+      }
+    })
+  }
+
+  function handleMove(taskId: string, newProjectId: string) {
+    markPending(taskId, true)
+    startTransition(async () => {
+      try {
+        await moveTask(taskId, newProjectId)
+      } finally {
+        markPending(taskId, false)
+      }
     })
   }
 
   function handleSnooze(taskId: string, duration: '1d' | '3d' | '1w' | '1m') {
+    markPending(taskId, true)
     startTransition(async () => {
-      await snoozeTask(taskId, duration)
+      try {
+        await snoozeTask(taskId, duration)
+      } finally {
+        markPending(taskId, false)
+      }
     })
   }
 
   function handleDelete(taskId: string) {
     if (!confirm('Er du sikker på at du vil slette denne oppgaven?')) return
+    markPending(taskId, true)
     startTransition(async () => {
-      await deleteTask(taskId)
+      try {
+        await deleteTask(taskId)
+      } finally {
+        markPending(taskId, false)
+      }
     })
   }
 
@@ -360,7 +409,9 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
                   <div className="border-t border-[#2a2827] divide-y divide-[#2a2827]">
                     {group.tasks.map((task) => {
                       const isExpanded = expandedTasks.has(task.id)
-                      const isDone = task.status === 'utfort' || task.status === 'lukket'
+                      const effectiveStatus = optimisticStatus[task.id] ?? task.status
+                      const isUpdating = pendingTasks.has(task.id)
+                      const isDone = effectiveStatus === 'utfort' || effectiveStatus === 'lukket'
                       const isOverdue =
                         task.dueDate &&
                         new Date(task.dueDate) < new Date() &&
@@ -369,7 +420,12 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
                       return (
                         <div
                           key={task.id}
-                          className="hover:bg-[#2a2827] transition-colors"
+                          className={`transition-all ${
+                            isUpdating
+                              ? 'opacity-50 pointer-events-none'
+                              : 'hover:bg-[#2a2827]'
+                          }`}
+                          aria-busy={isUpdating}
                         >
                           {/* Task row */}
                           <div className="flex items-center gap-3 px-5 py-3">
@@ -379,10 +435,13 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
                                 e.stopPropagation()
                                 handleStatusChange(task.id, isDone ? 'apen' : 'utfort')
                               }}
+                              disabled={isUpdating}
                               className="shrink-0 group/check"
                               title={isDone ? 'Marker som åpen' : 'Marker som utført'}
                             >
-                              {isDone ? (
+                              {isUpdating ? (
+                                <Loader2 className="h-[18px] w-[18px] text-emerald-500 animate-spin" />
+                              ) : isDone ? (
                                 <CheckCircle2 className="h-[18px] w-[18px] text-emerald-500" />
                               ) : (
                                 <Circle className="h-[18px] w-[18px] text-stone-600 group-hover/check:text-emerald-500/50 transition-colors" />
@@ -433,10 +492,10 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
                             {/* Status badge */}
                             <span
                               className={`text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0 ${
-                                statusColors[task.status]
+                                statusColors[effectiveStatus]
                               }`}
                             >
-                              {statusLabels[task.status]}
+                              {statusLabels[effectiveStatus]}
                             </span>
                           </div>
 
@@ -468,8 +527,9 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
                                     <button
                                       key={s}
                                       onClick={() => handleStatusChange(task.id, s)}
-                                      className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition-colors ${
-                                        task.status === s
+                                      disabled={isUpdating}
+                                      className={`text-[11px] px-2.5 py-1 rounded-full font-medium border transition-colors disabled:opacity-50 ${
+                                        effectiveStatus === s
                                           ? statusColors[s]
                                           : 'border-[#2a2827] text-stone-500 hover:text-stone-300 hover:border-stone-600'
                                       }`}
@@ -495,6 +555,30 @@ export function TaskList({ groupedTasks, projects, currentFilters }: TaskListPro
                                     {label}
                                   </button>
                                 ))}
+                              </div>
+
+                              {/* Move to another project */}
+                              <div className="flex items-center gap-2 mt-2">
+                                <span className="text-[11px] text-stone-500 flex items-center gap-1">
+                                  <FolderInput className="h-3 w-3" />
+                                  Flytt til:
+                                </span>
+                                <select
+                                  value={task.project.id}
+                                  disabled={isUpdating}
+                                  onChange={(e) => {
+                                    if (e.target.value !== task.project.id) {
+                                      handleMove(task.id, e.target.value)
+                                    }
+                                  }}
+                                  className="rounded-lg bg-[#0f0e0d] border border-[#2a2827] px-2 py-1 text-[11px] text-stone-300 focus:outline-none focus:border-[#C07A4A]/50 disabled:opacity-50"
+                                >
+                                  {projects.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.shortCode ? `${p.shortCode} - ${p.name}` : p.name}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
 
                               {/* Delete */}
