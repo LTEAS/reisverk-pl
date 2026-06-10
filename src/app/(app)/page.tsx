@@ -301,12 +301,12 @@ export default async function DashboardPage() {
         )}
       </section>
 
+      {/* Dagens briefing — full width, collapsible */}
+      <BriefingSection summary={latestBriefing?.summary || null} />
+
       {/* Godkjenningskø: AI-forslag + svarforslag */}
       <DashboardSuggestions suggestions={pendingSuggestions} projects={userProjects} />
       <DashboardReplyQueue items={pendingReplySuggestions} />
-
-      {/* Dagens briefing — full width, collapsible */}
-      <BriefingSection summary={latestBriefing?.summary || null} />
 
       {/* AI chat — compact inline */}
       <DashboardChat />
