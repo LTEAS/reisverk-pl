@@ -105,8 +105,9 @@ export async function logAiCall(params: {
       },
     });
 
-    // Update monthly usage (upsert)
-    if (params.status === 'success' || params.status === 'ok') {
+    // Update monthly usage (upsert) — tokens cost money regardless of how
+    // the call ended (max_iterations, unexpected_stop), so count all spend.
+    if (params.totalTokens > 0) {
       await prisma.monthlyUsage.upsert({
         where: { userId_periodMonth: { userId: params.userId, periodMonth } },
         create: {

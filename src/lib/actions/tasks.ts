@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/auth'
 import { createMessageWithRetry } from '@/lib/ai/anthropic'
 import { logAiCall } from '@/lib/ai/log'
+import { withNextTaskNumber } from '@/lib/task-number'
 import { TaskStatus } from '@prisma/client'
 
 // ---------------------------------------------------------------------------
@@ -19,15 +20,6 @@ async function verifyProjectMembership(userId: string, projectId: string) {
     throw new Error('Du har ikke tilgang til dette prosjektet')
   }
   return member
-}
-
-async function getNextTaskNumber(projectId: string): Promise<number> {
-  const last = await prisma.task.findFirst({
-    where: { projectId },
-    orderBy: { taskNumber: 'desc' },
-    select: { taskNumber: true },
-  })
-  return (last?.taskNumber ?? 0) + 1
 }
 
 // ---------------------------------------------------------------------------
@@ -51,21 +43,21 @@ export async function createTask(formData: FormData) {
 
   await verifyProjectMembership(userId, projectId)
 
-  const taskNumber = await getNextTaskNumber(projectId)
-
-  await prisma.task.create({
-    data: {
-      projectId,
-      title,
-      description,
-      priority: priority as any,
-      assignee,
-      dueDate: dueDateStr ? new Date(dueDateStr) : undefined,
-      taskNumber,
-      createdBy: userId,
-      source: 'manual',
-    },
-  })
+  await withNextTaskNumber(projectId, (taskNumber) =>
+    prisma.task.create({
+      data: {
+        projectId,
+        title,
+        description,
+        priority: priority as any,
+        assignee,
+        dueDate: dueDateStr ? new Date(dueDateStr) : undefined,
+        taskNumber,
+        createdBy: userId,
+        source: 'manual',
+      },
+    })
+  )
 
   revalidatePath('/tasks')
   revalidatePath(`/projects/${projectId}`)
@@ -125,12 +117,12 @@ export async function moveTask(taskId: string, newProjectId: string) {
 
   // Assign a fresh task number in the destination project (numbers are
   // project-scoped, so reusing the old one would collide/confuse)
-  const taskNumber = await getNextTaskNumber(newProjectId)
-
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { projectId: newProjectId, taskNumber },
-  })
+  await withNextTaskNumber(newProjectId, (taskNumber) =>
+    prisma.task.update({
+      where: { id: taskId },
+      data: { projectId: newProjectId, taskNumber },
+    })
+  )
 
   revalidatePath('/tasks')
   revalidatePath(`/projects/${task.projectId}`)

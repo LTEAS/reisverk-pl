@@ -68,7 +68,7 @@ Når du gjør endringer i databaseskjema (Prisma/SQL), server actions eller API-
 
 ### Tool-use loop (`src/lib/ai/tool-loop.ts`)
 - Agentic loop som kaller Claude med verktøy, kjører verktøy ved `tool_use`-stopp, og looper til `end_turn` eller maks 10 iterasjoner.
-- Modell: `claude-sonnet-4-6`, maks 4096 tokens per kall.
+- Modell: `claude-sonnet-4-6`, maks 8192 tokens per kall.
 - Alle kall logges i `ai_call_log`-tabellen.
 
 ### System prompt (`src/lib/ai/system-prompt.ts`)
@@ -85,7 +85,7 @@ Når du legger til nye verktøy:
 
 ## Cron-jobber
 
-- `sync-all` kjører kl 06:00, 11:00 og 15:00 på ukedager (Vercel Cron).
+- `sync-all` kjører kl 06:00 på ukedager (Vercel Cron — vercel.json er fasit for tidspunkt).
 - Synkroniserer e-post og kalender fra Microsoft 365.
 
 ## Prisma-konvensjoner

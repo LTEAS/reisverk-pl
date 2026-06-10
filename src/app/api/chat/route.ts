@@ -91,13 +91,15 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 5. Load conversation history (limit 40 messages)
-    const history = await prisma.chatMessage.findMany({
-      where: { threadId },
-      orderBy: { createdAt: "asc" },
-      take: 40,
-      select: { role: true, parts: true },
-    });
+    // 5. Load conversation history (last 40 messages, chronological order)
+    const history = (
+      await prisma.chatMessage.findMany({
+        where: { threadId },
+        orderBy: { createdAt: "desc" },
+        take: 40,
+        select: { role: true, parts: true },
+      })
+    ).reverse();
 
     // Convert DB messages to Anthropic format.
     // Keep full tool_use/tool_result structure for the last N messages.
@@ -152,13 +154,23 @@ export async function POST(request: NextRequest) {
         threadId,
       });
 
+      // Buffer the SSE byte stream so the "done" event is parsed reliably
+      // even when it is split across chunk boundaries.
+      const decoder = new TextDecoder();
+      let sseBuffer = "";
       const persist = new TransformStream<Uint8Array, Uint8Array>({
         async transform(chunk, ctrl) {
           ctrl.enqueue(chunk);
-          const chunkText = new TextDecoder().decode(chunk);
-          if (chunkText.includes("event: done")) {
+          sseBuffer += decoder.decode(chunk, { stream: true });
+
+          // Process complete events (terminated by blank line)
+          let sep: number;
+          while ((sep = sseBuffer.indexOf("\n\n")) !== -1) {
+            const rawEvent = sseBuffer.slice(0, sep);
+            sseBuffer = sseBuffer.slice(sep + 2);
+            if (!rawEvent.includes("event: done")) continue;
             try {
-              const dataLine = chunkText
+              const dataLine = rawEvent
                 .split("\n")
                 .find((l) => l.startsWith("data: "));
               if (dataLine) {

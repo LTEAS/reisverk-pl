@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { createClient } from '@/lib/supabase/server'
 import { syncEmails } from '@/lib/microsoft/email-sync'
 import { classifyEmails } from '@/lib/ai/email-classifier'
 import { processReferater } from '@/lib/ai/referat-processor'
@@ -133,10 +134,22 @@ export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
   const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`
-  const singleUserId = request.nextUrl.searchParams.get('userId')
+  const requestedUserId = request.nextUrl.searchParams.get('userId')
 
-  if (!isCronAuth && !singleUserId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Manual trigger: an authenticated user may only run the pipeline for
+  // themselves. The userId query param is honored only with cron auth.
+  let singleUserId: string | null = null
+  if (isCronAuth) {
+    singleUserId = requestedUserId
+  } else {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    singleUserId = user.id
   }
 
   const results: Record<string, PipelineResult> = {}

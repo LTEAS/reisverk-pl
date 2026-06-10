@@ -221,7 +221,7 @@ ${getAnalysisInstructions()}`,
   }
 
   const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 2000,
     messages: [{ role: "user", content: userContent }],
   });
@@ -614,7 +614,7 @@ export async function processReferater(
     await logAiCall({
       userId,
       purpose: "referat_processing",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       promptTokens: totalInputTokens,
       completionTokens: totalOutputTokens,
       totalTokens: totalInputTokens + totalOutputTokens,

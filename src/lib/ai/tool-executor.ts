@@ -1,10 +1,21 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { withNextTaskNumber } from "@/lib/task-number";
+import { logAiCall } from "@/lib/ai/log";
 import {
   TaskStatus,
   PriorityLevel,
   TaskSource,
 } from "@prisma/client";
+
+// ---------------------------------------------------------------------------
+// Enum validation — invalid values from the model should produce a clear
+// Norwegian error message, not a Prisma exception.
+// ---------------------------------------------------------------------------
+
+const VALID_STATUSES = Object.values(TaskStatus) as string[];
+const VALID_PRIORITIES = Object.values(PriorityLevel) as string[];
+const VALID_SOURCES = Object.values(TaskSource) as string[];
 
 // ---------------------------------------------------------------------------
 // Type helpers
@@ -42,19 +53,6 @@ async function requireProjectMembership(userId: string, projectId: string) {
     );
   }
   return membership;
-}
-
-// ---------------------------------------------------------------------------
-// Get next task number for a project
-// ---------------------------------------------------------------------------
-
-async function getNextTaskNumber(projectId: string): Promise<number> {
-  const last = await prisma.task.findFirst({
-    where: { projectId },
-    orderBy: { taskNumber: "desc" },
-    select: { taskNumber: true },
-  });
-  return (last?.taskNumber ?? 0) + 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,31 +177,44 @@ async function createTask(input: Input, userId: string): Promise<string> {
 
   await requireProjectMembership(userId, projectId);
 
-  const taskNumber = await getNextTaskNumber(projectId);
+  const priorityInput = str(input.priority) || "normal";
+  if (!VALID_PRIORITIES.includes(priorityInput)) {
+    return JSON.stringify({
+      error: `Ugyldig prioritet "${priorityInput}". Gyldige verdier: ${VALID_PRIORITIES.join(", ")}.`,
+    });
+  }
+  const sourceInput = str(input.source) || "manual";
+  if (!VALID_SOURCES.includes(sourceInput)) {
+    return JSON.stringify({
+      error: `Ugyldig kilde "${sourceInput}". Gyldige verdier: ${VALID_SOURCES.join(", ")}.`,
+    });
+  }
 
-  const priority = (str(input.priority) || "normal") as PriorityLevel;
-  const source = (str(input.source) || "manual") as TaskSource;
+  const priority = priorityInput as PriorityLevel;
+  const source = sourceInput as TaskSource;
   const dueDate = str(input.due_date)
     ? new Date(str(input.due_date))
     : undefined;
 
-  const task = await prisma.task.create({
-    data: {
-      projectId,
-      title,
-      description: str(input.description) || null,
-      priority,
-      assignee: str(input.assignee) || null,
-      dueDate: dueDate ?? null,
-      source,
-      taskNumber,
-      createdBy: userId,
-      aiGenerated: true,
-    },
-    include: {
-      project: { select: { name: true, shortCode: true } },
-    },
-  });
+  const task = await withNextTaskNumber(projectId, (taskNumber) =>
+    prisma.task.create({
+      data: {
+        projectId,
+        title,
+        description: str(input.description) || null,
+        priority,
+        assignee: str(input.assignee) || null,
+        dueDate: dueDate ?? null,
+        source,
+        taskNumber,
+        createdBy: userId,
+        aiGenerated: true,
+      },
+      include: {
+        project: { select: { name: true, shortCode: true } },
+      },
+    })
+  );
 
   return JSON.stringify({
     message: `Oppgave #${task.taskNumber} opprettet i prosjekt "${task.project.name}".`,
@@ -236,6 +247,18 @@ async function updateTask(input: Input, userId: string): Promise<string> {
   await requireProjectMembership(userId, existing.projectId);
 
   const newStatus = str(input.status) || undefined;
+  if (newStatus && !VALID_STATUSES.includes(newStatus)) {
+    return JSON.stringify({
+      error: `Ugyldig status "${newStatus}". Gyldige verdier: ${VALID_STATUSES.join(", ")}.`,
+    });
+  }
+  const newPriority = str(input.priority) || undefined;
+  if (newPriority && !VALID_PRIORITIES.includes(newPriority)) {
+    return JSON.stringify({
+      error: `Ugyldig prioritet "${newPriority}". Gyldige verdier: ${VALID_PRIORITIES.join(", ")}.`,
+    });
+  }
+
   const isCompleting =
     newStatus === "utfort" || newStatus === "lukket";
 
@@ -243,9 +266,7 @@ async function updateTask(input: Input, userId: string): Promise<string> {
     where: { id: taskId },
     data: {
       ...(newStatus ? { status: newStatus as TaskStatus } : {}),
-      ...(str(input.priority)
-        ? { priority: str(input.priority) as PriorityLevel }
-        : {}),
+      ...(newPriority ? { priority: newPriority as PriorityLevel } : {}),
       ...(str(input.title) ? { title: str(input.title) } : {}),
       ...(str(input.description)
         ? { description: str(input.description) }
@@ -456,11 +477,24 @@ ${instructions ? `Spesielle instruksjoner: ${instructions}` : ""}
 Skriv KUN selve svarteksten. Ikke inkluder emne, hilsen-linje på slutten eller signatur — bare brødteksten. Svar på det som faktisk ble spurt om eller meddelt.`;
 
   let draftBody: string;
+  const aiStart = Date.now();
   try {
     const aiResponse = await createMessageWithRetry({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
       messages: [{ role: "user", content: aiPrompt }],
+    });
+    await logAiCall({
+      userId,
+      purpose: "reply_suggestion",
+      model: "claude-haiku-4-5-20251001",
+      promptTokens: aiResponse.usage?.input_tokens || 0,
+      completionTokens: aiResponse.usage?.output_tokens || 0,
+      totalTokens:
+        (aiResponse.usage?.input_tokens || 0) +
+        (aiResponse.usage?.output_tokens || 0),
+      durationMs: Date.now() - aiStart,
+      status: "ok",
     });
     draftBody =
       aiResponse.content[0].type === "text"
@@ -666,21 +700,28 @@ async function updateProject(input: Input, userId: string): Promise<string> {
     ? (input.remove_contact_names as string[])
     : [];
   for (const name of removeNames) {
-    const deleted = await prisma.contact.deleteMany({
-      where: {
-        projectId,
-        name: { equals: name, mode: "insensitive" },
-      },
+    // Look up emails BEFORE deleting so the matching email monitors can be
+    // cleaned up too.
+    const toRemove = await prisma.contact.findMany({
+      where: { projectId, name: { equals: name, mode: "insensitive" } },
+      select: { email: true },
     });
-    if (deleted.count > 0) {
-      changes.push(`kontakt fjernet: ${name}`);
+    if (toRemove.length === 0) continue;
 
-      // Also remove email monitor if it was the only reference
-      const contact = await prisma.contact.findFirst({
-        where: { projectId, name: { equals: name, mode: "insensitive" } },
+    await prisma.contact.deleteMany({
+      where: { projectId, name: { equals: name, mode: "insensitive" } },
+    });
+
+    const emails = toRemove
+      .map((c) => c.email)
+      .filter((e): e is string => Boolean(e));
+    if (emails.length > 0) {
+      await prisma.emailMonitor.deleteMany({
+        where: { projectId, emailAddress: { in: emails } },
       });
-      // Contact already deleted, find by email in monitor
     }
+
+    changes.push(`kontakt fjernet: ${name}`);
   }
 
   if (changes.length === 0) {
@@ -715,6 +756,7 @@ async function acceptSuggestions(
   // Find suggestions to accept
   const suggestions = await prisma.aiSuggestion.findMany({
     where: {
+      projectId, // only suggestions belonging to the verified project
       status: "pending",
       ...(suggestionIds.length > 0 ? { id: { in: suggestionIds } } : {}),
       suggestionType: { in: ["new_task", "status_update", "close_task"] },
@@ -734,27 +776,31 @@ async function acceptSuggestions(
   let accepted = 0;
 
   for (const suggestion of suggestions) {
-    const taskNumber = await getNextTaskNumber(projectId);
+    const detailPriority = (suggestion.details as any)?.priority;
+    const priority = VALID_PRIORITIES.includes(detailPriority)
+      ? (detailPriority as PriorityLevel)
+      : "normal";
 
-    await prisma.task.create({
-      data: {
-        projectId,
-        title: suggestion.title,
-        description:
-          (suggestion.details as any)?.description ||
-          (suggestion.details as any)?.reason ||
-          null,
-        priority:
-          ((suggestion.details as any)?.priority as PriorityLevel) || "normal",
-        dueDate: (suggestion.details as any)?.dueDate
-          ? new Date((suggestion.details as any).dueDate)
-          : null,
-        taskNumber,
-        source: "ai_email" as TaskSource,
-        createdBy: userId,
-        aiGenerated: true,
-      },
-    });
+    await withNextTaskNumber(projectId, (taskNumber) =>
+      prisma.task.create({
+        data: {
+          projectId,
+          title: suggestion.title,
+          description:
+            (suggestion.details as any)?.description ||
+            (suggestion.details as any)?.reason ||
+            null,
+          priority,
+          dueDate: (suggestion.details as any)?.dueDate
+            ? new Date((suggestion.details as any).dueDate)
+            : null,
+          taskNumber,
+          source: "ai_email" as TaskSource,
+          createdBy: userId,
+          aiGenerated: true,
+        },
+      })
+    );
 
     await prisma.aiSuggestion.update({
       where: { id: suggestion.id },

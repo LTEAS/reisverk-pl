@@ -295,7 +295,7 @@ export async function classifyEmails(userId: string): Promise<{
     await logAiCall({
       userId,
       purpose: 'email_classification',
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       promptTokens: totalInputTokens,
       completionTokens: totalOutputTokens,
       totalTokens: totalInputTokens + totalOutputTokens,
@@ -365,7 +365,7 @@ Regler:
 - "isPrivate": true hvis e-posten er tydelig privat (familie, helse, personlig økonomi, fritid etc.), false for jobb-relatert`
 
   const response = await createMessageWithRetry({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 500,
     messages: [{ role: 'user', content: prompt }],
   })

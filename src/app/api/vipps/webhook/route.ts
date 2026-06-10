@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { capturePayment } from '@/lib/vipps/client'
+import { capturePayment, getPaymentStatus } from '@/lib/vipps/client'
 
 /**
  * Vipps webhook for payment status changes.
@@ -32,8 +32,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true }) // Already handled or unknown
     }
 
+    // The webhook payload is unauthenticated — never trust the event name
+    // alone. Verify the actual payment state with the Vipps API first.
+    let verifiedState: string
+    try {
+      const status = await getPaymentStatus(reference)
+      verifiedState = status.state
+    } catch (err) {
+      console.error('[vipps/webhook] State verification failed:', err)
+      return NextResponse.json({ ok: true }) // Ack; Vipps will retry
+    }
+
     // Payment authorized — capture and credit
-    if (name?.includes('authorized')) {
+    if (name?.includes('authorized') && verifiedState === 'AUTHORIZED') {
       try {
         await capturePayment(reference, topUp.amountNok * 100)
 
@@ -60,8 +71,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Payment aborted/expired/terminated
-    if (name?.includes('aborted') || name?.includes('expired') || name?.includes('terminated')) {
+    // Payment aborted/expired/terminated — verified against actual state
+    if (['ABORTED', 'EXPIRED', 'TERMINATED'].includes(verifiedState)) {
       await prisma.topUp.update({
         where: { id: topUp.id },
         data: { status: 'failed' },

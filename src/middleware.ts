@@ -2,7 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const publicPaths = ["/login", "/personvern", "/vilkar"];
-const publicPrefixes = ["/api/auth/", "/api/cron/"];
+// /api/vipps/webhook must be reachable without a session (server-to-server
+// callback from Vipps). The route verifies payment state against the Vipps
+// API itself before acting.
+const publicPrefixes = ["/api/auth/", "/api/cron/", "/api/vipps/webhook"];
 
 function isPublicPath(pathname: string): boolean {
   if (publicPaths.includes(pathname)) return true;

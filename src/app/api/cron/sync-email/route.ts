@@ -10,6 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { createClient } from '@/lib/supabase/server'
 import { syncEmails, type SyncResult } from '@/lib/microsoft/email-sync'
 
 export const maxDuration = 60 // allow up to 60s on Vercel
@@ -23,11 +24,20 @@ export async function GET(request: NextRequest) {
   const isCronAuth =
     cronSecret && authHeader === `Bearer ${cronSecret}`
 
-  // Also allow manual trigger from the app (with userId param)
-  const singleUserId = request.nextUrl.searchParams.get('userId')
-
-  if (!isCronAuth && !singleUserId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Manual trigger: an authenticated user may only sync their own account.
+  // The userId query param is honored only with cron auth.
+  let singleUserId: string | null = null
+  if (isCronAuth) {
+    singleUserId = request.nextUrl.searchParams.get('userId')
+  } else {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    singleUserId = user.id
   }
 
   const results: Record<string, SyncResult> = {}

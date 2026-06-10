@@ -193,6 +193,8 @@ model UserRole {
 
   @@unique([userId, role])
   @@map("user_roles")
+  // NB: user_settings.user_role ble fjernet 2026-06-10 — denne tabellen er
+  // eneste kilde for app-roller.
 }
 
 model UserSettings {
@@ -204,7 +206,6 @@ model UserSettings {
   syncEnabled              Boolean  @default(true) @map("sync_enabled")
   syncIntervalMin          Int      @default(30) @map("sync_interval_min")
   prepHoursBefore          Int      @default(2) @map("prep_hours_before")
-  userRole                 AppRole  @default(user) @map("user_role")
 
   user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -233,6 +234,7 @@ model Project {
   briefingItems  BriefingItem[]
   replySuggestions ReplySuggestion[]
 
+  @@index([createdBy], map: "idx_projects_created_by")
   @@map("projects")
 }
 
@@ -247,6 +249,7 @@ model ProjectMember {
   user    Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, userId])
+  @@index([userId], map: "idx_project_members_user_id")
   @@map("project_members")
 }
 
@@ -262,6 +265,7 @@ model Contact {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@index([projectId], map: "idx_contacts_project_id")
   @@map("contacts")
 }
 
@@ -374,9 +378,14 @@ model Task {
   creator           Profile            @relation("TaskCreator", fields: [createdBy], references: [id])
   briefingPriorities BriefingPriority[]
 
+  @@unique([projectId, taskNumber], map: "tasks_project_id_task_number_key")
   @@index([projectId])
   @@index([status])
   @@index([dueDate])
+  @@index([assigneeUserId], map: "idx_tasks_assignee_user_id")
+  @@index([createdBy], map: "idx_tasks_created_by")
+  @@index([meetingId], map: "idx_tasks_meeting_id")
+  @@index([sourceEmailId], map: "idx_tasks_source_email_id")
   @@map("tasks")
 }
 
@@ -398,6 +407,7 @@ model AiSuggestion {
 
   @@index([projectId])
   @@index([status])
+  @@index([reviewedBy], map: "idx_ai_suggestions_reviewed_by")
   @@map("ai_suggestions")
 }
 
@@ -430,6 +440,7 @@ model Meeting {
   @@unique([userId, graphEventId])
   @@index([userId])
   @@index([startsAt])
+  @@index([projectId], map: "idx_meetings_project_id")
   @@map("meetings")
 }
 
@@ -450,6 +461,8 @@ model MeetingPrep {
   meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   user    Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([meetingId], map: "idx_meeting_prep_meeting_id")
+  @@index([userId], map: "idx_meeting_prep_user_id")
   @@map("meeting_prep")
 }
 
@@ -494,6 +507,8 @@ model BriefingItem {
   user    Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
   project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
+  @@index([projectId], map: "idx_briefing_items_project_id")
+  @@index([userId], map: "idx_briefing_items_user_id")
   @@map("briefing_items")
 }
 
@@ -512,6 +527,8 @@ model BriefingPriority {
   user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
   task Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
+  @@index([taskId], map: "idx_briefing_priorities_task_id")
+  @@index([userId], map: "idx_briefing_priorities_user_id")
   @@map("briefing_priorities")
 }
 
@@ -525,6 +542,7 @@ model ChatThread {
   user     Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages ChatMessage[]
 
+  @@index([userId], map: "idx_chat_threads_user_id")
   @@map("chat_threads")
 }
 
@@ -539,6 +557,8 @@ model ChatMessage {
   thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   user   Profile    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([threadId], map: "idx_chat_messages_thread_id")
+  @@index([userId], map: "idx_chat_messages_user_id")
   @@map("chat_messages")
 }
 
@@ -561,6 +581,9 @@ model ReplySuggestion {
   user    Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
   project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
+  @@index([emailId], map: "idx_reply_suggestions_email_id")
+  @@index([projectId], map: "idx_reply_suggestions_project_id")
+  @@index([userId], map: "idx_reply_suggestions_user_id")
   @@map("reply_suggestions")
 }
 
@@ -580,6 +603,7 @@ model AiCallLog {
 
   user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId], map: "idx_ai_call_log_user_id")
   @@map("ai_call_log")
 }
 
@@ -612,6 +636,7 @@ model SyncLog {
 
   user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId], map: "idx_sync_log_user_id")
   @@map("sync_log")
 }
 
@@ -652,6 +677,7 @@ model TopUp {
 
   user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId], map: "idx_top_ups_user_id")
   @@map("top_ups")
 }
 
