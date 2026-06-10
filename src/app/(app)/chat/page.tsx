@@ -2,8 +2,13 @@ import { requireUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { ChatView } from './chat-view'
 
-export default async function ChatPage() {
+export default async function ChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
   const user = await requireUser()
+  const { q } = await searchParams
   const userId = user.id
 
   const threads = await prisma.chatThread.findMany({
@@ -19,7 +24,7 @@ export default async function ChatPage() {
 
   return (
     <div className="h-full flex">
-      <ChatView threads={threads} />
+      <ChatView threads={threads} initialPrompt={q || null} />
     </div>
   )
 }

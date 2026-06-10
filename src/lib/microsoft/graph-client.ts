@@ -111,6 +111,36 @@ export async function graphGet<T = any>(
   return res.json()
 }
 
+/**
+ * Make a POST request to Microsoft Graph. Returns parsed JSON.
+ */
+export async function graphPost<T = any>(
+  userId: string,
+  path: string,
+  body: unknown
+): Promise<T> {
+  const token = await getAccessToken(userId)
+  const url = path.startsWith('http') ? path : `${GRAPH_BASE}${path}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(
+      `Graph API error ${res.status}: ${err.error?.message || JSON.stringify(err)}`
+    )
+  }
+
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // Attachment helpers
 // ---------------------------------------------------------------------------

@@ -3,6 +3,16 @@
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/lib/auth'
+import { withNextTaskNumber } from '@/lib/task-number'
+
+async function requireProjectMembership(userId: string, projectId: string) {
+  const member = await prisma.projectMember.findFirst({
+    where: { projectId, userId },
+  })
+  if (!member) {
+    throw new Error('Du har ikke tilgang til dette prosjektet')
+  }
+}
 
 /**
  * Accept an AI suggestion — creates the task and marks suggestion as accepted.
@@ -77,28 +87,26 @@ export async function acceptSuggestion(suggestionId: string, overrideProjectId?:
   } else {
     // Create a task (use override project if provided)
     const targetProjectId = overrideProjectId || suggestion.projectId
-    const lastTask = await prisma.task.findFirst({
-      where: { projectId: targetProjectId },
-      orderBy: { taskNumber: 'desc' },
-      select: { taskNumber: true },
-    })
+    await requireProjectMembership(userId, targetProjectId)
 
-    await prisma.task.create({
-      data: {
-        projectId: targetProjectId,
-        title: suggestion.title,
-        description: details.description || null,
-        priority: details.priority || 'normal',
-        status: 'apen',
-        source: 'ai_email',
-        sourceEmailId: suggestion.sourceEmailId,
-        aiGenerated: true,
-        aiConfidence: 0.8,
-        taskNumber: (lastTask?.taskNumber || 0) + 1,
-        createdBy: userId,
-        dueDate: details.dueDate ? new Date(details.dueDate) : null,
-      },
-    })
+    await withNextTaskNumber(targetProjectId, (taskNumber) =>
+      prisma.task.create({
+        data: {
+          projectId: targetProjectId,
+          title: suggestion.title,
+          description: details.description || null,
+          priority: details.priority || 'normal',
+          status: 'apen',
+          source: 'ai_email',
+          sourceEmailId: suggestion.sourceEmailId,
+          aiGenerated: true,
+          aiConfidence: 0.8,
+          taskNumber,
+          createdBy: userId,
+          dueDate: details.dueDate ? new Date(details.dueDate) : null,
+        },
+      })
+    )
   }
 
   // Mark suggestion as accepted
@@ -121,6 +129,13 @@ export async function acceptSuggestion(suggestionId: string, overrideProjectId?:
 export async function rejectSuggestion(suggestionId: string) {
   const user = await requireUser()
   const userId = user.id
+
+  const suggestion = await prisma.aiSuggestion.findUnique({
+    where: { id: suggestionId },
+    select: { projectId: true },
+  })
+  if (!suggestion) throw new Error('Forslag ikke funnet')
+  await requireProjectMembership(userId, suggestion.projectId)
 
   await prisma.aiSuggestion.update({
     where: { id: suggestionId },

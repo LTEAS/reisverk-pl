@@ -1,15 +1,24 @@
+import { Suspense } from 'react'
 import { requireUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { TaskList } from './task-list'
+import { TaskBoard } from './task-board'
+import { ViewToggle } from './view-toggle'
 
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; project?: string; priority?: string }>
+  searchParams: Promise<{
+    status?: string
+    project?: string
+    priority?: string
+    view?: string
+  }>
 }) {
   const user = await requireUser()
   const userId = user.id
   const params = await searchParams
+  const view = params.view === 'tavle' ? 'tavle' : 'liste'
 
   // Get user's projects for filter dropdown
   const projects = await prisma.project.findMany({
@@ -64,15 +73,34 @@ export default async function TasksPage({
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <TaskList
-        groupedTasks={groupedTasks}
-        projects={projects}
-        currentFilters={{
-          status: params.status || 'alle',
-          project: params.project || 'alle',
-          priority: params.priority || 'alle',
-        }}
-      />
+      <div className="flex justify-end">
+        <Suspense>
+          <ViewToggle active={view} />
+        </Suspense>
+      </div>
+      {view === 'tavle' ? (
+        <TaskBoard
+          tasks={tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            dueDate: t.dueDate,
+            taskNumber: t.taskNumber,
+            project: t.project,
+          }))}
+        />
+      ) : (
+        <TaskList
+          groupedTasks={groupedTasks}
+          projects={projects}
+          currentFilters={{
+            status: params.status || 'alle',
+            project: params.project || 'alle',
+            priority: params.priority || 'alle',
+          }}
+        />
+      )}
     </div>
   )
 }

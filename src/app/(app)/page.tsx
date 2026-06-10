@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { RefreshButton } from './dashboard-refresh'
 import { DashboardSuggestions } from './dashboard-suggestions'
+import { DashboardReplyQueue } from './dashboard-reply-queue'
 import { BriefingSection } from './dashboard-briefing'
 import { DashboardChat } from './dashboard-chat'
 import { Onboarding } from './onboarding'
@@ -70,6 +71,7 @@ export default async function DashboardPage() {
     latestBriefing,
     openPriorities,
     pendingSuggestions,
+    pendingReplySuggestions,
     activeReminders,
     userProjects,
     msAccount,
@@ -131,9 +133,12 @@ export default async function DashboardPage() {
       },
     }),
 
-    // Pending AI suggestions
+    // Pending AI suggestions (only for projects the user is a member of)
     prisma.aiSuggestion.findMany({
-      where: { status: 'pending' },
+      where: {
+        status: 'pending',
+        project: { members: { some: { userId } } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 20,
       select: {
@@ -142,6 +147,22 @@ export default async function DashboardPage() {
         suggestionType: true,
         details: true,
         sourceEmailSubject: true,
+        project: { select: { name: true, shortCode: true } },
+      },
+    }),
+
+    // Pending reply suggestions for the approval queue
+    prisma.replySuggestion.findMany({
+      where: { userId, status: 'suggested' },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        draftBody: true,
+        outlookWebLink: true,
+        email: {
+          select: { subject: true, senderName: true, senderEmail: true },
+        },
         project: { select: { name: true, shortCode: true } },
       },
     }),
@@ -179,6 +200,13 @@ export default async function DashboardPage() {
 
   const greeting = getGreeting()
 
+  // Next meeting starting within 60 minutes
+  const nowTs = Date.now()
+  const nextMeetingSoon = todayMeetings.find((m) => {
+    const diffMin = (m.startsAt.getTime() - nowTs) / 60000
+    return diffMin > 0 && diffMin <= 60
+  })
+
   // Onboarding state
   const onboardingState = {
     msConnected: !!msAccount?.connectedAt,
@@ -215,76 +243,76 @@ export default async function DashboardPage() {
         <RefreshButton />
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <StatCard
-          label="Åpne oppgaver"
-          value={openTaskCount}
-          icon={<CheckSquare className="h-5 w-5" />}
-          color="blue"
-          href="/tasks"
-        />
-        <StatCard
-          label="Dagens møter"
-          value={todayMeetings.length}
-          icon={<Calendar className="h-5 w-5" />}
-          color="purple"
+      {/* Møte snart-banner */}
+      {nextMeetingSoon && (
+        <a
           href="/meetings"
-        />
-        <StatCard
-          label="Forfalt"
-          value={overdueTasks}
-          icon={<AlertTriangle className="h-5 w-5" />}
-          color="red"
-          href="/tasks?filter=overdue"
-        />
-      </div>
+          className="flex items-center gap-3 rounded-xl bg-[#C07A4A]/10 border border-[#C07A4A]/30 p-4 hover:bg-[#C07A4A]/15 transition-colors"
+        >
+          <div className="rounded-lg bg-[#C07A4A]/20 p-2">
+            <Calendar className="h-5 w-5 text-[#C07A4A]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white">
+              Møte om {Math.round((nextMeetingSoon.startsAt.getTime() - nowTs) / 60000)} min: {nextMeetingSoon.subject || 'Uten tittel'}
+            </p>
+            <p className="text-xs text-stone-400 mt-0.5">
+              {formatTime(nextMeetingSoon.startsAt)}
+              {nextMeetingSoon.isOnline
+                ? ' · Online'
+                : nextMeetingSoon.location
+                  ? ` · ${nextMeetingSoon.location}`
+                  : ''}
+              {' — se møteforberedelse'}
+            </p>
+          </div>
+          <ArrowRight className="h-4 w-4 text-[#C07A4A] shrink-0" />
+        </a>
+      )}
+
+      {/* Dagens viktigste — øverst */}
+      <section className="rounded-xl bg-[#1a1918] border border-[#2a2827] p-5">
+        <h2 className="text-base font-semibold text-white mb-4">
+          Dagens viktigste
+        </h2>
+        {openPriorities.length > 0 ? (
+          <ul className="space-y-2">
+            {openPriorities.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-[#2a2827] transition-colors"
+              >
+                <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-[#C07A4A]" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-stone-200">{p.itemText}</p>
+                  {p.task && (
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      Oppgave: {p.task.title}
+                    </p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-stone-500 text-center py-4">
+            Ingen åpne handlingspunkter
+          </p>
+        )}
+      </section>
+
+      {/* Godkjenningskø: AI-forslag + svarforslag */}
+      <DashboardSuggestions suggestions={pendingSuggestions} projects={userProjects} />
+      <DashboardReplyQueue items={pendingReplySuggestions} />
 
       {/* Dagens briefing — full width, collapsible */}
       <BriefingSection summary={latestBriefing?.summary || null} />
-
-      {/* AI suggestions requiring approval */}
-      <DashboardSuggestions suggestions={pendingSuggestions} projects={userProjects} />
 
       {/* AI chat — compact inline */}
       <DashboardChat />
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Left column */}
-        <div className="space-y-6">
-          {/* Prioriterte handlingspunkter */}
-          <section className="rounded-xl bg-[#1a1918] border border-[#2a2827] p-5">
-            <h2 className="text-base font-semibold text-white mb-4">
-              Prioriterte handlingspunkter
-            </h2>
-            {openPriorities.length > 0 ? (
-              <ul className="space-y-2">
-                {openPriorities.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-[#2a2827] transition-colors"
-                  >
-                    <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-[#C07A4A]" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-stone-200">{p.itemText}</p>
-                      {p.task && (
-                        <p className="text-xs text-stone-500 mt-0.5">
-                          Oppgave: {p.task.title}
-                        </p>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-stone-500 text-center py-4">
-                Ingen åpne handlingspunkter
-              </p>
-            )}
-          </section>
-        </div>
-
-        {/* Right column */}
         <div className="space-y-6">
           {/* Dagens møter */}
           <section className="rounded-xl bg-[#1a1918] border border-[#2a2827] p-5">
@@ -405,6 +433,31 @@ export default async function DashboardPage() {
             )}
           </section>
         </div>
+      </div>
+
+      {/* Nøkkeltall — nederst */}
+      <div className="grid grid-cols-3 gap-4">
+        <StatCard
+          label="Åpne oppgaver"
+          value={openTaskCount}
+          icon={<CheckSquare className="h-5 w-5" />}
+          color="blue"
+          href="/tasks"
+        />
+        <StatCard
+          label="Dagens møter"
+          value={todayMeetings.length}
+          icon={<Calendar className="h-5 w-5" />}
+          color="purple"
+          href="/meetings"
+        />
+        <StatCard
+          label="Forfalt"
+          value={overdueTasks}
+          icon={<AlertTriangle className="h-5 w-5" />}
+          color="red"
+          href="/tasks?filter=overdue"
+        />
       </div>
     </div>
   )

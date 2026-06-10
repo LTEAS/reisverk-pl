@@ -8,17 +8,20 @@ import {
   CheckSquare,
   FolderKanban,
   Calendar,
+  Mail,
   MessageSquare,
   Settings,
   Shield,
   LogOut,
 } from 'lucide-react'
+import { SyncStatus } from './sync-status'
 
 const navItems = [
   { label: 'Oversikt', icon: LayoutDashboard, href: '/' },
   { label: 'Oppgaver', icon: CheckSquare, href: '/tasks' },
   { label: 'Prosjekter', icon: FolderKanban, href: '/projects' },
   { label: 'Møter', icon: Calendar, href: '/meetings' },
+  { label: 'E-post', icon: Mail, href: '/emails' },
   { label: 'AI Chat', icon: MessageSquare, href: '/chat' },
   { label: 'Innstillinger', icon: Settings, href: '/settings' },
 ]
@@ -131,6 +134,7 @@ export function AppSidebar({ user, onNavigate }: AppSidebarProps) {
 
       {/* User section */}
       <div className="border-t border-[#2a2827] p-2.5">
+        <SyncStatus />
         <div className="flex items-center gap-2.5 rounded-lg px-2.5 py-2">
           {user.avatarUrl ? (
             <img

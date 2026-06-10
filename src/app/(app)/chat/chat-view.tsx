@@ -53,7 +53,13 @@ const capabilities = [
 // ChatView
 // ---------------------------------------------------------------------------
 
-export function ChatView({ threads: initialThreads }: { threads: Thread[] }) {
+export function ChatView({
+  threads: initialThreads,
+  initialPrompt = null,
+}: {
+  threads: Thread[]
+  initialPrompt?: string | null
+}) {
   const router = useRouter()
   const [threads, setThreads] = useState(initialThreads)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
@@ -67,6 +73,35 @@ export function ChatView({ threads: initialThreads }: { threads: Thread[] }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Prefill input from ?q= deep links (e.g. "Spør AI" buttons)
+  useEffect(() => {
+    if (initialPrompt) {
+      setInput(initialPrompt)
+      inputRef.current?.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // AI usage meter
+  const [usage, setUsage] = useState<{
+    unlimited: boolean
+    spentNok: number
+    limitNok: number
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/usage')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && !cancelled) setUsage(d)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [loading])
 
   async function loadThread(threadId: string) {
     setSelectedThreadId(threadId)
@@ -297,10 +332,11 @@ export function ChatView({ threads: initialThreads }: { threads: Thread[] }) {
                 <div className="w-10 h-10 rounded-xl bg-[#C07A4A]/20 flex items-center justify-center">
                   <Bot className="h-5 w-5 text-[#C07A4A]" />
                 </div>
-                <div>
+                <div className="flex-1">
                   <h2 className="text-lg font-semibold text-white">AI-assistent</h2>
                   <p className="text-xs text-stone-500">Din prosjektassistent for Reisverk</p>
                 </div>
+                <UsageMeter usage={usage} />
               </div>
               <p className="text-sm text-stone-400 mb-4">
                 Jeg kan hjelpe deg med det meste i prosjektoppfølgingen. Spør meg om noe, eller bruk en av hurtigkommandoene under.
@@ -338,6 +374,7 @@ export function ChatView({ threads: initialThreads }: { threads: Thread[] }) {
                   <span className="text-[11px] text-stone-600">—</span>
                   <span className="text-[11px] text-stone-500">Prosjekter, oppgaver, e-post, møter, forslag</span>
                 </div>
+                <UsageMeter usage={usage} />
               </div>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {suggestions.slice(0, 4).map((s) => (
@@ -457,5 +494,55 @@ export function ChatView({ threads: initialThreads }: { threads: Thread[] }) {
         </div>
       </div>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// UsageMeter — compact AI quota indicator for the chat header
+// ---------------------------------------------------------------------------
+
+function UsageMeter({
+  usage,
+}: {
+  usage: { unlimited: boolean; spentNok: number; limitNok: number } | null
+}) {
+  if (!usage || usage.unlimited) return null
+
+  const pct = usage.limitNok > 0
+    ? Math.min((usage.spentNok / usage.limitNok) * 100, 100)
+    : 0
+  const nearLimit = pct >= 80
+  const exhausted = pct >= 100
+
+  return (
+    <a
+      href="/settings"
+      className="shrink-0 group"
+      title={`AI-forbruk: ${usage.spentNok.toFixed(1)} av ${usage.limitNok.toFixed(0)} kr denne måneden`}
+    >
+      <div className="flex items-center gap-2">
+        <div className="w-20 h-1.5 rounded-full bg-[#2a2827] overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${
+              exhausted ? 'bg-red-500' : nearLimit ? 'bg-amber-400' : 'bg-[#C07A4A]'
+            }`}
+            style={{ width: `${Math.max(pct, 3)}%` }}
+          />
+        </div>
+        <span
+          className={`text-[10px] font-medium ${
+            exhausted
+              ? 'text-red-400'
+              : nearLimit
+                ? 'text-amber-400'
+                : 'text-stone-500 group-hover:text-stone-300'
+          }`}
+        >
+          {exhausted
+            ? 'Kvote brukt opp'
+            : `${usage.spentNok.toFixed(0)}/${usage.limitNok.toFixed(0)} kr`}
+        </span>
+      </div>
+    </a>
   )
 }
