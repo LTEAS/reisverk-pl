@@ -32,6 +32,36 @@ interface ClassificationResult {
   confidence: number
 }
 
+// Structural subset of an email row used for classification.
+type ClassifiableEmail = {
+  id: string
+  subject: string | null
+  bodyPreview: string | null
+  bodyText: string | null
+  senderEmail: string | null
+  senderName: string | null
+  direction: string | null
+  hasAttachments: boolean
+  importance: string | null
+}
+
+// Number of emails per AI classification call. Same per-email instructions as
+// the single-email path, just delivered together to cut round-trips.
+const BATCH_SIZE = 8
+
+const SAFE_FALLBACK_CLASSIFICATION: ClassificationResult = {
+  actionNeeded: false,
+  actionDescription: null,
+  summary: '',
+  replyStatus: 'no_reply_needed',
+  suggestedProjectCode: null,
+  suggestedNewProject: null,
+  suggestedSearchTerms: null,
+  suggestedContacts: null,
+  isPrivate: false,
+  confidence: 0,
+}
+
 // ---------------------------------------------------------------------------
 // Classify a batch of emails
 // ---------------------------------------------------------------------------
@@ -161,10 +191,7 @@ export async function classifyEmails(userId: string): Promise<{
   let totalInputTokens = 0
   let totalOutputTokens = 0
 
-  // Helper: wait ms
-  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-  async function processEmail(email: typeof emails[0]) {
+  async function processEmail(email: typeof emails[0], classification: ClassificationResult) {
     // ConversationId arv
     let matchedProjectId: string | null = null
 
@@ -183,12 +210,8 @@ export async function classifyEmails(userId: string): Promise<{
       if (scoreMatch) matchedProjectId = scoreMatch.id
     }
 
-    // AI-klassifisering
-    const classification = await classifySingleEmail(email, projectContext)
-    if (classification._usage) {
-      totalInputTokens += classification._usage.input
-      totalOutputTokens += classification._usage.output
-    }
+    // AI-klassifisering er allerede gjort i et batchet kall (classifyEmailsBatched)
+    // og sendes inn som parameter.
 
     // Foreslå nytt prosjekt FØRST (før AI-kode-matching som kan matche GEN/PRIVAT)
     if (!matchedProjectId && classification.suggestedNewProject && !classification.isPrivate) {
@@ -252,27 +275,25 @@ export async function classifyEmails(userId: string): Promise<{
     result.processed++
   }
 
-  // Process with bounded concurrency + per-email rate-limit retry.
-  // Sequential was safe but slow (one Sonnet call at a time); a small pool
-  // cuts wall-clock time ~CONCURRENCY-fold while still backing off on 429.
+  // --- AI-klassifisering, batchet ---
+  // Klassifiser e-postene i batcher (ett API-kall per batch) i stedet for ett
+  // kall per e-post. Samme modell og samme instruks per e-post, så kvaliteten
+  // per e-post er uendret — vi kutter bare antall rundturer og sender
+  // prosjektkonteksten én gang per batch i stedet for én gang per e-post.
+  const classified = await classifyEmailsBatched(emails, projectContext)
+  totalInputTokens += classified.usage.input
+  totalOutputTokens += classified.usage.output
+
+  // --- DB-fase, per e-post (rask, ingen AI) med begrenset samtidighet ---
   const CONCURRENCY = 4
 
   async function processWithRetry(email: typeof emails[0]) {
+    const classification =
+      classified.byId.get(email.id) ?? SAFE_FALLBACK_CLASSIFICATION
     try {
-      await processEmail(email)
-    } catch (err: any) {
-      if (err?.status === 429) {
-        // Rate limited — wait 15s and retry once
-        console.log('Rate limited, waiting 15s...')
-        await wait(15000)
-        try {
-          await processEmail(email)
-        } catch (retryErr) {
-          console.error('Failed after retry:', retryErr)
-        }
-      } else {
-        console.error(`Failed to classify email ${email.id}:`, err)
-      }
+      await processEmail(email, classification)
+    } catch (err) {
+      console.error(`Failed to persist classification for email ${email.id}:`, err)
     }
   }
 
@@ -399,4 +420,179 @@ Regler:
       _usage,
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Batched classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify all emails using batched AI calls (BATCH_SIZE per call) instead of
+ * one call per email. Same model and same per-email instructions, so per-email
+ * quality is unchanged; this only reduces the number of round-trips and sends
+ * the project context once per batch. Falls back to single-email classification
+ * for any batch whose response can't be parsed, so quality is never degraded.
+ */
+async function classifyEmailsBatched(
+  emails: ClassifiableEmail[],
+  projectContext: string
+): Promise<{
+  byId: Map<string, ClassificationResult>
+  usage: { input: number; output: number }
+}> {
+  const byId = new Map<string, ClassificationResult>()
+  const usage = { input: 0, output: 0 }
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  for (let i = 0; i < emails.length; i += BATCH_SIZE) {
+    const chunk = emails.slice(i, i + BATCH_SIZE)
+    let parsed: ClassificationResult[] | null = null
+
+    try {
+      const res = await classifyBatch(chunk, projectContext)
+      usage.input += res.usage.input
+      usage.output += res.usage.output
+      parsed = res.results
+    } catch (err: any) {
+      if (err?.status === 429) {
+        // Rate limited — wait 15s and retry the batch once
+        console.log('Batch rate limited, waiting 15s...')
+        await wait(15000)
+        try {
+          const res = await classifyBatch(chunk, projectContext)
+          usage.input += res.usage.input
+          usage.output += res.usage.output
+          parsed = res.results
+        } catch (retryErr) {
+          console.error('Batch failed after retry:', retryErr)
+          parsed = null
+        }
+      } else {
+        console.error('Batch classification failed:', err)
+        parsed = null
+      }
+    }
+
+    if (parsed && parsed.length === chunk.length) {
+      chunk.forEach((email, idx) => byId.set(email.id, parsed![idx]))
+    } else {
+      // Fallback: classify this chunk one email at a time to preserve quality.
+      for (const email of chunk) {
+        try {
+          const single = await classifySingleEmail(email, projectContext)
+          if (single._usage) {
+            usage.input += single._usage.input
+            usage.output += single._usage.output
+          }
+          byId.set(email.id, single)
+        } catch (e) {
+          console.error(`Single-email fallback failed for ${email.id}:`, e)
+          byId.set(email.id, SAFE_FALLBACK_CLASSIFICATION)
+        }
+      }
+    }
+  }
+
+  return { byId, usage }
+}
+
+/**
+ * Classify a single batch of emails in one AI call. Returns one
+ * ClassificationResult per input email, in the same order. Output is normalized
+ * so downstream code always receives a well-formed result.
+ */
+async function classifyBatch(
+  emails: ClassifiableEmail[],
+  projectContext: string
+): Promise<{ results: ClassificationResult[]; usage: { input: number; output: number } }> {
+  const emailBlocks = emails
+    .map((email, idx) => {
+      const body = (email.bodyText || email.bodyPreview || '').slice(0, 2000)
+      return `### E-POST ${idx + 1}
+Fra: ${email.senderName || 'ukjent'} <${email.senderEmail || 'ukjent'}>
+Emne: ${email.subject || '(ingen)'}
+Retning: ${email.direction === 'outbound' ? 'SENDT av bruker' : 'MOTTATT'}
+Vedlegg: ${email.hasAttachments ? 'Ja' : 'Nei'}
+Viktighet: ${email.importance || 'normal'}
+Innhold: ${body}`
+    })
+    .join('\n\n')
+
+  const prompt = `Analyser disse ${emails.length} e-postene for en byggeprosjektleder. Svar med BARE et JSON-ARRAY.
+
+${emailBlocks}
+
+BRUKERENS PROSJEKTER:
+${projectContext || 'Ingen prosjekter registrert'}
+
+Svar med et JSON-ARRAY med NØYAKTIG ${emails.length} objekter, i SAMME REKKEFØLGE som e-postene over (E-POST 1 først). Hvert objekt:
+{
+  "actionNeeded": true/false,
+  "actionDescription": "Hva må gjøres (eller null)",
+  "summary": "1-2 setninger oppsummering",
+  "replyStatus": "needs_reply" | "no_reply_needed" | "awaiting_reply",
+  "suggestedProjectCode": "prosjektkode fra listen, eller null",
+  "suggestedNewProject": "Foreslått prosjektnavn, eller null",
+  "suggestedSearchTerms": ["søkeord1", "søkeord2"] eller null,
+  "suggestedContacts": ["Navn <epost>"] eller null,
+  "isPrivate": true/false,
+  "confidence": 0.0-1.0
+}
+
+Regler (gjelder hver e-post for seg):
+- UTGÅENDE e-poster (SENDT av bruker): "actionNeeded" skal ALLTID være false. Sett "replyStatus" til "awaiting_reply" hvis det ventes svar, ellers "no_reply_needed".
+- "needs_reply": e-posten stiller spørsmål eller ber om noe.
+- "awaiting_reply": bruker har sendt noe og venter på svar.
+- "no_reply_needed": informasjon, bekreftelse, eller allerede besvart.
+- Kun "actionNeeded" for MOTTATTE e-poster som krever konkret handling (ikke bare lesing).
+- "suggestedProjectCode": Match til et EKSISTERENDE prosjekt fra listen (bruk prosjektkoden). Bruk "GEN" eller "PRIVAT" KUN for e-poster som ikke tilhører et spesifikt prosjekt.
+- "suggestedNewProject": Hvis e-posten tydelig handler om et byggeprosjekt/eiendom/oppdrag som IKKE finnes i listen — foreslå et navn (sted/adresse/prosjektnavn) og sett suggestedProjectCode til null.
+- "suggestedSearchTerms": Ved nytt prosjekt — 3-6 søkeord som matcher fremtidige e-poster (sted, adresse, firma, prosjektnummer, aktører).
+- "suggestedContacts": Ved nytt prosjekt — relevante kontakter som "Fullt Navn <epost@adresse>".
+- "isPrivate": true hvis e-posten er tydelig privat (familie, helse, personlig økonomi, fritid), ellers false.
+
+Returner KUN JSON-arrayet, ingen annen tekst.`
+
+  const response = await createMessageWithRetry({
+    model: 'claude-sonnet-4-6',
+    max_tokens: Math.min(8000, emails.length * 600 + 400),
+    messages: [{ role: 'user', content: prompt }],
+  })
+
+  const rawText =
+    response.content[0].type === 'text' ? response.content[0].text : '[]'
+  const usage = {
+    input: response.usage?.input_tokens || 0,
+    output: response.usage?.output_tokens || 0,
+  }
+
+  const jsonStr = rawText
+    .replace(/^```json?\s*\n?/i, '')
+    .replace(/\n?```\s*$/i, '')
+    .trim()
+
+  const arr = JSON.parse(jsonStr)
+  if (!Array.isArray(arr)) throw new Error('Batch response is not a JSON array')
+
+  const results: ClassificationResult[] = arr.map((o: any) => ({
+    actionNeeded: !!o?.actionNeeded,
+    actionDescription: o?.actionDescription ?? null,
+    summary: typeof o?.summary === 'string' ? o.summary : '',
+    replyStatus:
+      o?.replyStatus === 'needs_reply' || o?.replyStatus === 'awaiting_reply'
+        ? o.replyStatus
+        : 'no_reply_needed',
+    suggestedProjectCode: o?.suggestedProjectCode ?? null,
+    suggestedNewProject: o?.suggestedNewProject ?? null,
+    suggestedSearchTerms: Array.isArray(o?.suggestedSearchTerms)
+      ? o.suggestedSearchTerms
+      : null,
+    suggestedContacts: Array.isArray(o?.suggestedContacts)
+      ? o.suggestedContacts
+      : null,
+    isPrivate: !!o?.isPrivate,
+    confidence: typeof o?.confidence === 'number' ? o.confidence : 0,
+  }))
+
+  return { results, usage }
 }

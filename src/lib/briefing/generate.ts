@@ -611,7 +611,7 @@ VIKTIG: Ikke hopp over detaljer. Beløp, datoer, adresser, dokumentnavn, kontakt
 // Main export
 // ---------------------------------------------------------------------------
 
-const BRIEFING_MODEL = 'claude-sonnet-4-6'
+const BRIEFING_MODEL = 'claude-opus-4-8'
 const BRIEFING_MONTHLY_LIMIT = 30
 
 /**
