@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Shield,
   RotateCcw,
+  CalendarPlus,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,7 @@ interface SettingsData {
   requireTaskConfirmation: boolean
   syncEnabled: boolean
   syncIntervalMin: number
+  meetingCreationEnabled: boolean
 }
 
 type MsAccountData = {
@@ -285,6 +287,40 @@ export function SettingsForm({
             checked={form.requireTaskConfirmation}
             onChange={(v) => updateField('requireTaskConfirmation', v)}
           />
+        </div>
+      </section>
+
+      {/* Calendar / meeting creation */}
+      <section className="rounded-xl bg-[#1a1918] border border-[#2a2827] p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <CalendarPlus className="h-4 w-4 text-sky-400" />
+          <h2 className="text-base font-semibold text-white">Kalender</h2>
+        </div>
+
+        <div className="space-y-4">
+          <ToggleSetting
+            label="La AI opprette møter"
+            description="Tillat at assistenten oppretter møter i Outlook-kalenderen din med påminnelse. Assistenten bekrefter alltid tidspunkt og deltakere før et møte opprettes."
+            checked={form.meetingCreationEnabled}
+            onChange={(v) => updateField('meetingCreationEnabled', v)}
+          />
+
+          {form.meetingCreationEnabled && (
+            <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 px-4 py-3 space-y-2">
+              <p className="text-xs text-sky-300">
+                Når dette er på må du (1) lagre innstillingene og (2) koble til
+                Microsoft på nytt én gang for å gi kalenderskriving. Etterpå
+                opprettes møter uten ny innlogging.
+              </p>
+              <a
+                href="/api/auth/microsoft/connect?write=1"
+                className="inline-flex items-center gap-2 rounded-lg bg-sky-500/10 px-3 py-2 text-sm text-sky-300 hover:bg-sky-500/20 transition-colors"
+              >
+                <Cloud className="h-3.5 w-3.5" />
+                Koble til Microsoft på nytt (med skrivetilgang)
+              </a>
+            </div>
+          )}
         </div>
       </section>
 

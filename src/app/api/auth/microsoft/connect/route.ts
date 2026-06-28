@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import crypto from 'crypto'
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -28,13 +28,19 @@ export async function GET() {
     path: '/',
   })
 
+  // Calendar write access is opt-in: only requested when the meeting-creation
+  // feature is enabled (the settings reconnect button hits ?write=1). Default
+  // stays read-only for least privilege.
+  const wantCalendarWrite =
+    new URL(request.url).searchParams.get('write') === '1'
+
   const scopes = [
     'openid',
     'profile',
     'email',
     'offline_access',
     'Mail.Read',
-    'Calendars.Read',
+    wantCalendarWrite ? 'Calendars.ReadWrite' : 'Calendars.Read',
   ]
 
   const params = new URLSearchParams({

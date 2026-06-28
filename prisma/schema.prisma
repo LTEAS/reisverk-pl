@@ -206,6 +206,7 @@ model UserSettings {
   syncEnabled              Boolean  @default(true) @map("sync_enabled")
   syncIntervalMin          Int      @default(30) @map("sync_interval_min")
   prepHoursBefore          Int      @default(2) @map("prep_hours_before")
+  meetingCreationEnabled   Boolean  @default(false) @map("meeting_creation_enabled")
 
   user Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
 

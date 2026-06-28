@@ -356,6 +356,53 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       required: ["email_id"],
     },
   },
+  {
+    name: "create_meeting",
+    description:
+      "Opprett et nytt møte i brukerens Outlook-kalender. Møtet lagres i kalenderen med påminnelse. Krever at brukeren har slått på møteoppretting i Innstillinger og koblet til Microsoft med skrivetilgang. Bekreft alltid tidspunkt og deltakere før du oppretter — Outlook sender møteinnkallelse til deltakerne.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        subject: { type: "string", description: "Møtetittel" },
+        start: {
+          type: "string",
+          description:
+            "Starttidspunkt i ISO 8601. Tolkes som norsk tid hvis tidssone mangler (f.eks. 2026-07-01T13:00:00).",
+        },
+        end: {
+          type: "string",
+          description:
+            "Sluttidspunkt i ISO 8601. Hvis utelatt settes det 1 time etter start.",
+        },
+        location: { type: "string", description: "Sted (valgfritt)" },
+        body: { type: "string", description: "Agenda/beskrivelse (valgfritt)" },
+        attendees: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "E-postadresser til deltakere (valgfritt). Outlook sender møteinnkallelse til disse.",
+        },
+        reminder_minutes: {
+          type: "number",
+          description: "Minutter før møtet påminnelsen skal vises (standard 15).",
+        },
+        is_online: {
+          type: "boolean",
+          description: "Opprett som Teams-møte med lenke (valgfritt).",
+        },
+        project_id: {
+          type: "string",
+          description: "Knytt møtet til et prosjekt (valgfritt).",
+        },
+        create_app_reminder: {
+          type: "boolean",
+          description:
+            "Opprett også en påminnelse i appen som vises på dashbordet (valgfritt).",
+        },
+      },
+      required: ["subject", "start"],
+    },
+  },
 ];
 
 /** Utility type: name of any defined tool */

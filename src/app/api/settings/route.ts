@@ -22,6 +22,7 @@ export async function PUT(request: NextRequest) {
     'requireTaskConfirmation',
     'syncEnabled',
     'syncIntervalMin',
+    'meetingCreationEnabled',
   ]
 
   const data: Record<string, any> = {}

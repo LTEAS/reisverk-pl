@@ -59,6 +59,7 @@ export default async function SettingsPage() {
     requireTaskConfirmation: true,
     syncEnabled: true,
     syncIntervalMin: 30,
+    meetingCreationEnabled: false,
   }
 
   return (

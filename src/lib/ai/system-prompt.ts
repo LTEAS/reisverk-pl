@@ -167,5 +167,6 @@ ${memoryLines}
 - Ved e-postspørsmål, søk alltid i e-post først med search_emails.
 - Bruk create_reminder når brukeren ber om å bli minnet på noe, sette en påminnelse, eller huske å gjøre noe til et bestemt tidspunkt. Påminnelser vises på dashboardet og i den daglige briefingen.
 - For gjentakende ting (f.eks. "hver onsdag kl 14"), bruk recurring-parameteren i create_reminder.
+- Bruk create_meeting når brukeren ber om å opprette eller sette opp et møte i kalenderen. Bekreft ALLTID tidspunkt og deltakere med brukeren før du oppretter — Outlook sender møteinnkallelse til deltakerne automatisk. Oppgi tidspunkt i ISO 8601. Dersom verktøyet svarer at møteoppretting er av, be brukeren slå det på i Innstillinger og koble til Microsoft på nytt.
 - Prioriter handlingsbare svar: foreslå konkrete neste steg.`;
 }

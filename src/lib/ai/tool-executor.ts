@@ -2,6 +2,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { withNextTaskNumber } from "@/lib/task-number";
 import { logAiCall } from "@/lib/ai/log";
+import { graphPost } from "@/lib/microsoft/graph-client";
+import { fromZonedTime } from "date-fns-tz";
 import {
   TaskStatus,
   PriorityLevel,
@@ -818,6 +820,185 @@ async function acceptSuggestions(
 }
 
 // ---------------------------------------------------------------------------
+// Calendar — create meeting (opt-in; requires Calendars.ReadWrite)
+// ---------------------------------------------------------------------------
+
+const OSLO_TZ = "Europe/Oslo";
+
+// Interpret an ISO string. If it carries an explicit zone (Z or +hh:mm) trust
+// it; otherwise treat the wall-clock time as Europe/Oslo.
+function parseInstant(s: string): Date {
+  const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(s.trim());
+  return hasZone ? new Date(s) : fromZonedTime(s, OSLO_TZ);
+}
+
+async function createMeeting(input: Input, userId: string): Promise<string> {
+  // Gate: feature must be enabled in settings
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { meetingCreationEnabled: true },
+  });
+  if (!settings?.meetingCreationEnabled) {
+    return JSON.stringify({
+      error:
+        "Møteoppretting er ikke slått på. Slå det på under Innstillinger og koble til Microsoft på nytt for å gi kalenderskriving.",
+    });
+  }
+
+  const subject = str(input.subject);
+  if (!subject) return JSON.stringify({ error: "Møtetittel er påkrevd" });
+
+  const startStr = str(input.start);
+  if (!startStr) return JSON.stringify({ error: "Starttidspunkt er påkrevd" });
+  const startDate = parseInstant(startStr);
+  if (isNaN(startDate.getTime()))
+    return JSON.stringify({ error: "Ugyldig starttidspunkt" });
+
+  const endStr = str(input.end);
+  const endDate = endStr
+    ? parseInstant(endStr)
+    : new Date(startDate.getTime() + 60 * 60 * 1000);
+  if (isNaN(endDate.getTime()))
+    return JSON.stringify({ error: "Ugyldig sluttidspunkt" });
+  if (endDate <= startDate)
+    return JSON.stringify({ error: "Sluttidspunkt må være etter starttidspunkt" });
+
+  const location = str(input.location) || null;
+  const body = str(input.body) || null;
+  const reminderMinutes = num(input.reminder_minutes, 15);
+  const isOnline = bool(input.is_online, false);
+  const projectId = str(input.project_id) || null;
+  const createAppReminder = bool(input.create_app_reminder, false);
+
+  const attendeeList = Array.isArray(input.attendees)
+    ? (input.attendees as unknown[])
+        .map((a) => (typeof a === "string" ? a.trim() : ""))
+        .filter((a) => a.length > 0)
+    : [];
+
+  // Optional project link — verify membership
+  if (projectId) {
+    await requireProjectMembership(userId, projectId);
+  }
+
+  // Best-effort scope pre-check for a friendlier message
+  const account = await prisma.microsoftAccount.findUnique({
+    where: { userId },
+    select: { scope: true, refreshToken: true },
+  });
+  if (!account?.refreshToken) {
+    return JSON.stringify({
+      error: "Ingen Microsoft-konto tilkoblet. Koble til under Innstillinger.",
+    });
+  }
+  if (account.scope && !account.scope.includes("Calendars.ReadWrite")) {
+    return JSON.stringify({
+      error:
+        "Mangler skrivetilgang til kalenderen. Koble til Microsoft på nytt fra Innstillinger for å gi kalenderskriving.",
+    });
+  }
+
+  // Build the Graph event. Times are sent as UTC instants so the absolute
+  // moment is unambiguous regardless of the input format.
+  const graphEvent: Record<string, unknown> = {
+    subject,
+    start: { dateTime: startDate.toISOString().slice(0, 19), timeZone: "UTC" },
+    end: { dateTime: endDate.toISOString().slice(0, 19), timeZone: "UTC" },
+    isReminderOn: true,
+    reminderMinutesBeforeStart: reminderMinutes,
+  };
+  if (body) graphEvent.body = { contentType: "text", content: body };
+  if (location) graphEvent.location = { displayName: location };
+  if (attendeeList.length > 0) {
+    graphEvent.attendees = attendeeList.map((address) => ({
+      emailAddress: { address },
+      type: "required",
+    }));
+  }
+  if (isOnline) {
+    graphEvent.isOnlineMeeting = true;
+    graphEvent.onlineMeetingProvider = "teamsForBusiness";
+  }
+
+  let created: any;
+  try {
+    created = await graphPost<any>(userId, "/me/events", graphEvent);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Ukjent feil";
+    if (/403|Access|ErrorAccessDenied|forbidden/i.test(msg)) {
+      return JSON.stringify({
+        error:
+          "Microsoft avviste skriving til kalenderen (manglende tilgang). Koble til Microsoft på nytt fra Innstillinger med skrivetilgang.",
+      });
+    }
+    return JSON.stringify({ error: `Kunne ikke opprette møte: ${msg}` });
+  }
+
+  // Mirror into the local meetings table so it shows immediately in the app.
+  const onlineUrl = created?.onlineMeeting?.joinUrl ?? null;
+  const meeting = await prisma.meeting.create({
+    data: {
+      userId,
+      projectId,
+      graphEventId: created?.id ?? null,
+      subject,
+      startsAt: startDate,
+      endsAt: endDate,
+      location,
+      isOnline,
+      onlineUrl,
+      attendees:
+        attendeeList.length > 0
+          ? attendeeList.map((email) => ({ email }))
+          : undefined,
+      syncedAt: new Date(),
+    },
+  });
+
+  // Optional in-app reminder (shown on dashboard / in the briefing)
+  if (createAppReminder) {
+    const remindAt = new Date(startDate.getTime() - reminderMinutes * 60 * 1000);
+    await prisma.reminder.create({
+      data: {
+        userId,
+        title: `Møte: ${subject}`,
+        description: location ? `Sted: ${location}` : null,
+        remindAt,
+        recurring: null,
+      },
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/meetings");
+
+  return JSON.stringify({
+    success: true,
+    meeting: {
+      id: meeting.id,
+      subject,
+      startsAt: startDate.toISOString(),
+      endsAt: endDate.toISOString(),
+      location,
+      isOnline,
+      onlineUrl,
+      attendees: attendeeList,
+    },
+    message: `Møte opprettet i kalenderen: "${subject}" ${startDate.toLocaleString(
+      "nb-NO",
+      {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: OSLO_TZ,
+      }
+    )}${attendeeList.length ? `, ${attendeeList.length} deltaker(e) invitert` : ""}${reminderMinutes ? `, påminnelse ${reminderMinutes} min før` : ""}.`,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Main dispatcher
 // ---------------------------------------------------------------------------
 
@@ -850,6 +1031,8 @@ export async function executeTool(
         return await acceptSuggestions(toolInput, userId);
       case "get_calendar":
         return await getCalendar(toolInput, userId);
+      case "create_meeting":
+        return await createMeeting(toolInput, userId);
       case "save_memory":
         return await saveMemory(toolInput, userId);
       case "search_memories":
