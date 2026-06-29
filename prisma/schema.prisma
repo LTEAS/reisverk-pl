@@ -327,6 +327,7 @@ model Email {
   aiProcessedAt    DateTime?       @map("ai_processed_at") @db.Timestamptz
   replyStatus      ReplyStatus?    @map("reply_status")
   repliedAt        DateTime?       @map("replied_at") @db.Timestamptz
+  removedAt        DateTime?       @map("removed_at") @db.Timestamptz
   projectMatchScore Float?         @map("project_match_score")
   referatProcessed Boolean         @default(false) @map("referat_processed")
   referatSummary   String?         @map("referat_summary")

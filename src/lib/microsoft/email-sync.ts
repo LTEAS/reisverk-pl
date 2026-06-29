@@ -130,6 +130,7 @@ export interface SyncResult {
   created: number
   updated: number
   skipped: number
+  reconciledRemoved?: number
   deltaLink?: string
   error?: string
 }
@@ -181,8 +182,16 @@ export async function syncEmails(userId: string): Promise<SyncResult> {
     )
 
     for (const msg of items) {
-      // Handle deleted messages
+      // Email left the inbox (deleted, moved to junk, filed, archived). Mark the
+      // local row removed so it stops counting as unanswered, instead of leaving
+      // a stale row behind on a plain skip.
       if (msg['@removed']) {
+        if (msg.id) {
+          await prisma.email.updateMany({
+            where: { userId, graphMessageId: msg.id },
+            data: { removedAt: new Date() },
+          })
+        }
         result.skipped++
         continue
       }
@@ -229,6 +238,7 @@ export async function syncEmails(userId: string): Promise<SyncResult> {
         importance: msg.importance || null,
         isRead: msg.isRead || false,
         noiseScore,
+        removedAt: null,
         syncedAt: new Date(),
       }
 
@@ -279,6 +289,47 @@ export async function syncEmails(userId: string): Promise<SyncResult> {
     }
 
     result.deltaLink = deltaLink
+
+    // Reconciliation: mark emails that have left the inbox (deleted, moved to
+    // junk, filed, archived) as removed. The inbox delta reports such messages
+    // as '@removed' only once, so a periodic sweep against the current inbox
+    // contents also clears rows that went stale before this was tracked.
+    try {
+      const windowStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+      const inboxFilter = `receivedDateTime ge ${windowStart.toISOString()}`
+      const { items: inboxItems } = await graphGetAll<{ id: string }>(
+        userId,
+        `/me/mailFolders/inbox/messages?$select=id&$filter=${encodeURIComponent(inboxFilter)}&$top=100`,
+        20
+      )
+      const inboxIds = new Set(
+        inboxItems.map((m) => m.id).filter((id): id is string => !!id)
+      )
+      // Guard: only reconcile when the inbox listing actually returned data, so a
+      // failed or empty fetch never wipes the local mirror.
+      if (inboxIds.size > 0) {
+        const candidates = await prisma.email.findMany({
+          where: {
+            userId,
+            removedAt: null,
+            receivedAt: { gte: windowStart },
+          },
+          select: { id: true, graphMessageId: true },
+        })
+        const staleIds = candidates
+          .filter((e) => e.graphMessageId && !inboxIds.has(e.graphMessageId))
+          .map((e) => e.id)
+        if (staleIds.length > 0) {
+          await prisma.email.updateMany({
+            where: { id: { in: staleIds } },
+            data: { removedAt: new Date() },
+          })
+          result.reconciledRemoved = staleIds.length
+        }
+      }
+    } catch (err) {
+      console.warn('Inbox reconciliation skipped:', err)
+    }
 
     // Update sync log
     await prisma.syncLog.update({

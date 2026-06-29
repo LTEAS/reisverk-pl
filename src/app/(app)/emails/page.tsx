@@ -14,7 +14,7 @@ export default async function EmailsPage({
 
   const [emails, needsReplyCount, awaitingCount] = await Promise.all([
     prisma.email.findMany({
-      where: { userId, replyStatus: filter },
+      where: { userId, replyStatus: filter, removedAt: null },
       orderBy: { receivedAt: 'desc' },
       take: 100,
       select: {
@@ -41,8 +41,8 @@ export default async function EmailsPage({
         },
       },
     }),
-    prisma.email.count({ where: { userId, replyStatus: 'needs_reply' } }),
-    prisma.email.count({ where: { userId, replyStatus: 'awaiting_reply' } }),
+    prisma.email.count({ where: { userId, replyStatus: 'needs_reply', removedAt: null } }),
+    prisma.email.count({ where: { userId, replyStatus: 'awaiting_reply', removedAt: null } }),
   ])
 
   return (

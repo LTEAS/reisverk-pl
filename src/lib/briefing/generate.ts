@@ -43,6 +43,13 @@ async function fetchCurrentState(userId: string) {
   const twoDaysAhead = new Date(today)
   twoDaysAhead.setDate(twoDaysAhead.getDate() + 2)
 
+  // Who we are briefing — so the model treats meetings/tasks/emails by this
+  // person as the user themselves, not a third party.
+  const profile = await prisma.profile.findUnique({
+    where: { id: userId },
+    select: { displayName: true, email: true },
+  })
+
   const [
     recentEmails,
     todayMeetings,
@@ -60,6 +67,7 @@ async function fetchCurrentState(userId: string) {
         userId,
         receivedAt: { gte: twoDaysBack },
         noiseScore: { lt: 40 },
+        removedAt: null,
       },
       orderBy: { receivedAt: 'desc' },
       take: 30,
@@ -126,6 +134,7 @@ async function fetchCurrentState(userId: string) {
         userId,
         direction: 'inbound',
         noiseScore: { lt: 40 },
+        removedAt: null,
         replyStatus: { in: ['needs_reply', 'awaiting_reply'] },
       },
     }),
@@ -175,6 +184,7 @@ async function fetchCurrentState(userId: string) {
   return {
     now,
     today,
+    profile,
     recentEmails,
     todayMeetings,
     openTasks,
@@ -190,6 +200,19 @@ async function fetchCurrentState(userId: string) {
 // ---------------------------------------------------------------------------
 // Format helpers
 // ---------------------------------------------------------------------------
+
+function userIdentityBlock(
+  profile: { displayName: string | null; email: string | null } | null | undefined
+): string {
+  const name = profile?.displayName || profile?.email || 'brukeren'
+  const email = profile?.email ? ` (${profile.email})` : ''
+  return `BRUKERIDENTITET — VIKTIG:
+Du skriver denne gjennomgangen TIL ${name}${email}. Dette er prosjektlederen selv — mottakeren av briefingen.
+Når et møte er arrangert av ${name}, en oppgave er tildelt ${name}, eller en e-post er sendt fra ${name}, gjelder det BRUKEREN SELV.
+- Omtal slike ting i ANDRE PERSON: "befaringen du arrangerer", "dine delegerte oppgaver", "du har sendt".
+- ALDRI be brukeren hente status, svar eller bekreftelse fra seg selv. Har ${name} delegert noe til andre, er handlingen å følge opp DE ANDRE — ikke ${name}.
+- Ikke omtal ${name} som en tredjepart.`
+}
 
 function formatEmails(emails: any[]): string {
   return emails
@@ -244,7 +267,7 @@ function formatTasks(tasks: any[]): string {
 // ---------------------------------------------------------------------------
 
 function buildInitialPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>): string {
-  const { now, recentEmails, todayMeetings, openTasks, overdueTasks, unansweredEmails, upcomingDeadlines, projects, activeReminders, previousBriefing } = state
+  const { now, profile, recentEmails, todayMeetings, openTasks, overdueTasks, unansweredEmails, upcomingDeadlines, projects, activeReminders, previousBriefing } = state
 
   // Build project context
   const projectContext = projects
@@ -320,6 +343,8 @@ function buildInitialPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>
   return `Du er prosjektgjennomgangs-AI for en byggeprosjektleder i Norge. Generer en DETALJERT daglig prosjektgjennomgang på norsk (bokmål).
 
 DATO: ${now.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+
+${userIdentityBlock(profile)}
 
 BRUKERENS PROSJEKTER:
 ${projectContext || 'Ingen prosjekter definert'}
@@ -425,7 +450,7 @@ function buildUpdatePrompt(
   generatedAt: Date,
   state: Awaited<ReturnType<typeof fetchCurrentState>>
 ): string {
-  const { now, recentEmails, todayMeetings, openTasks, overdueTasks, unansweredEmails } = state
+  const { now, profile, recentEmails, todayMeetings, openTasks, overdueTasks, unansweredEmails } = state
 
   // Only emails received after the briefing was generated
   const newEmails = recentEmails.filter(
@@ -479,6 +504,8 @@ function buildUpdatePrompt(
 
 TIDSPUNKT NÅ: ${now.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}
 BRIEFING GENERERT: ${generatedAt.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit', timeZone: TZ })}
+
+${userIdentityBlock(profile)}
 
 === EKSISTERENDE BRIEFING ===
 ${existingBriefing}
@@ -537,7 +564,7 @@ IKKE pakk briefingen inn i JSON eller kodeblokk — den skal være ren markdown 
 // ---------------------------------------------------------------------------
 
 function buildAnalysisPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>>): string {
-  const { now, recentEmails, projects } = state
+  const { now, profile, recentEmails, projects } = state
 
   const projectContext = projects
     .filter((p) => p.shortCode !== 'GEN' && p.shortCode !== 'PRIVAT')
@@ -571,6 +598,8 @@ function buildAnalysisPrompt(state: Awaited<ReturnType<typeof fetchCurrentState>
   return `Du er en erfaren analytiker for en byggeprosjektleder i Norge. Les GRUNDIG gjennom alle e-postene nedenfor og skriv en DETALJERT analyse per prosjekt.
 
 DATO: ${now.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+
+${userIdentityBlock(profile)}
 
 PROSJEKTER:
 ${projectContext}

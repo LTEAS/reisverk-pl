@@ -111,6 +111,7 @@ export default async function DashboardPage() {
       where: {
         userId,
         replyStatus: { in: ['needs_reply', 'awaiting_reply'] },
+        removedAt: null,
       },
     }),
 
